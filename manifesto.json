@@ -1,0 +1,62 @@
+{
+  "nome": "Regularização 360",
+  "versao": "0.1.1",
+  "descricao": "Gestão do ciclo de vida da regularização fundiária — navegação territorial, propostas comerciais e acompanhamento de status.",
+  "shell_min": "0.51.0",
+  "permissao_padrao": "leitura",
+  "roles": {
+    "escrita": {
+      "criador": {
+        "descricao": "Cria e edita Propostas. Edita Unidades e Pessoas via Núcleo."
+      },
+      "validador_interno": {
+        "descricao": "Aprova Propostas pendentes (pendente → aprovada). Gestores com alçada."
+      },
+      "editor_regularizacao": {
+        "descricao": "Edita campos de status de regularização dos Parcelamentos."
+      }
+    }
+  },
+  "nav": [
+    { "titulo": "Regularização", "rota": "/", "icone": "fa-solid fa-city" },
+    { "titulo": "Parcelamentos", "rota": "/parcelamentos", "icone": "fa-solid fa-map" },
+    { "titulo": "Unidades", "rota": "/unidades", "icone": "fa-solid fa-house" }
+  ],
+  "dependencias_nucleo": [
+    "pessoas",
+    "imoveis",
+    "setores_habitacionais",
+    "parcelamentos",
+    "incorporacoes",
+    "matriculas"
+  ],
+  "permissoes_nucleo": {
+    "pessoas": ["ler", "escrever"],
+    "imoveis": ["ler", "escrever", "remover"],
+    "setores_habitacionais": ["ler"],
+    "parcelamentos": ["ler", "escrever"],
+    "incorporacoes": ["ler"],
+    "matriculas": ["ler", "escrever"]
+  },
+  "eventos": {
+    "proposta_criada": {
+      "campos": ["proposta_id", "titulo", "nivel", "tipo_proposta", "preco_m2", "data_proposta", "data_fim_vigencia", "criador"],
+      "conteudo": "Nova proposta \"{titulo}\" ({tipo_proposta}) criada por {criador} — R$ {preco_m2}/m², vigência {data_proposta} a {data_fim_vigencia}",
+      "api": "propostas/{proposta_id}",
+      "rota": "proposta/{proposta_id}"
+    },
+    "proposta_aprovada": {
+      "campos": ["proposta_id", "titulo", "nivel", "tipo_proposta", "aprovador"],
+      "conteudo": "Proposta \"{titulo}\" ({tipo_proposta}) aprovada por {aprovador}",
+      "api": "propostas/{proposta_id}",
+      "rota": "proposta/{proposta_id}"
+    }
+  },
+  "rotinas": {
+    "checar_propostas_vencendo": {
+      "titulo": "Vencimento de Propostas Tabela",
+      "descricao": "Verifica Propostas Tabela de Setor Habitacional a até 24h do vencimento e notifica os validadores internos.",
+      "frequencia": "diaria"
+    }
+  }
+}

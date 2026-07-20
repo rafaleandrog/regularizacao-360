@@ -1,0 +1,7 @@
+# Config do pnpm (pnpm 10/11 leem daqui, não mais do campo "pnpm" do package.json).
+# esbuild precisa rodar seu script de instalação para baixar/verificar o binário nativo.
+# allowBuilds: formato do pnpm 11 (local). onlyBuiltDependencies: formato do pnpm 10 (CI).
+allowBuilds:
+  esbuild: true
+onlyBuiltDependencies:
+  - esbuild

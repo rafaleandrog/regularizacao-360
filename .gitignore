@@ -1,0 +1,10 @@
+node_modules/
+dist/
+
+# artefatos de build (gerados por pnpm build)
+backend/rotas.js
+frontend/index.js
+
+# logs e temporários
+*.log
+.DS_Store

@@ -1,0 +1,25 @@
+{
+  "name": "@urbiverso/app-reg360",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "description": "App UrbiVerso de Regularização Fundiária (Regularização 360)",
+  "scripts": {
+    "build": "esbuild frontend/index.ts --bundle --external:@urbiverso/ui --format=esm --outfile=frontend/index.js --target=es2022 --minify --tsconfig=tsconfig.json && esbuild backend/rotas.ts --bundle --minify --format=esm --outfile=backend/rotas.js --platform=node --target=node20 --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\"",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx/esm --test backend/__tests__/*.test.ts",
+    "empacotar": "urbi-empacotar reg360 --dir . --saida ./dist"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "lit": "^3.2.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.0.0",
+    "@urbiverso/sdk": "0.50.3",
+    "esbuild": "^0.24.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.6.0"
+  }
+}

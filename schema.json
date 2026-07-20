@@ -1,0 +1,108 @@
+{
+  "tabelas": {
+    "propostas": {
+      "soft_delete": true,
+      "acesso_externo": "restrito",
+      "colunas": {
+        "titulo": {
+          "tipo": "texto",
+          "limite": 200,
+          "obrigatorio": true
+        },
+        "descricao": {
+          "tipo": "texto_longo"
+        },
+        "nivel": {
+          "tipo": "texto",
+          "limite": 20,
+          "obrigatorio": true,
+          "opcoes": ["setor", "parcelamento", "unidade"]
+        },
+        "tipo_proposta": {
+          "tipo": "texto",
+          "limite": 30,
+          "obrigatorio": true,
+          "opcoes": ["tabela", "campanha", "negociacao_coletiva"]
+        },
+        "ref_id": {
+          "tipo": "inteiro",
+          "obrigatorio": true
+        },
+        "data_proposta": {
+          "tipo": "data",
+          "obrigatorio": true
+        },
+        "data_fim_vigencia": {
+          "tipo": "data",
+          "obrigatorio": true
+        },
+        "status_aprovacao": {
+          "tipo": "texto",
+          "limite": 20,
+          "obrigatorio": true,
+          "padrao": "pendente",
+          "opcoes": ["pendente", "aprovada"]
+        },
+        "criado_por_id": {
+          "tipo": "referencia",
+          "tabela_ref": "shell.usuarios",
+          "campos_incluir": ["nome as criador_nome"],
+          "ao_deletar": "restringir"
+        },
+        "aprovado_por_id": {
+          "tipo": "referencia",
+          "tabela_ref": "shell.usuarios",
+          "campos_incluir": ["nome as aprovador_nome"],
+          "ao_deletar": "anular"
+        },
+        "preco_m2": {
+          "tipo": "decimal",
+          "precisao": 12,
+          "escala": 2,
+          "obrigatorio": true
+        },
+        "preco_minimo_residencial": {
+          "tipo": "decimal",
+          "precisao": 12,
+          "escala": 2
+        },
+        "preco_minimo_comercial_misto": {
+          "tipo": "decimal",
+          "precisao": 12,
+          "escala": 2
+        },
+        "desconto_a_vista": {
+          "tipo": "decimal",
+          "precisao": 5,
+          "escala": 2
+        },
+        "desconto_6x": {
+          "tipo": "decimal",
+          "precisao": 5,
+          "escala": 2
+        },
+        "desconto_12x": {
+          "tipo": "decimal",
+          "precisao": 5,
+          "escala": 2
+        },
+        "desconto_lote_grande": {
+          "tipo": "decimal",
+          "precisao": 5,
+          "escala": 2
+        },
+        "lote_grande_m2": {
+          "tipo": "decimal",
+          "precisao": 10,
+          "escala": 2
+        },
+        "notificacao_vencimento_enviada": {
+          "tipo": "booleano",
+          "padrao": false
+        }
+      },
+      "unicos": [["nivel", "ref_id", "data_proposta"]],
+      "indices": [["nivel", "ref_id"], ["status_aprovacao"], ["tipo_proposta"]]
+    }
+  }
+}
