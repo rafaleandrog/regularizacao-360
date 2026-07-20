@@ -56,7 +56,10 @@ jobs:
           echo "versao=$versao" >> "$GITHUB_OUTPUT"
           echo "release_tag=$releaseTag" >> "$GITHUB_OUTPUT"
       - name: Instalar dependências
-        run: pnpm install --frozen-lockfile
+        # Sem --frozen-lockfile: o repo ainda não tem pnpm-lock.yaml commitado
+        # (o SDK privado exige token, gerado só localmente). O CI resolve com o
+        # secret abaixo. Depois de commitar um lockfile, volte a usar --frozen-lockfile.
+        run: pnpm install --no-frozen-lockfile
         env:
           # @urbiverso/sdk é privado (GitHub Packages, org urbiverso). O GITHUB_TOKEN efêmero
           # deste repo NÃO tem read:packages cross-org (403), então usamos um PAT com
