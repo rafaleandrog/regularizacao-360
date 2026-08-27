@@ -1,5 +1,6 @@
 import { urbiVerso } from './reg360-env.js';
 import * as nucleo from './nucleo-cliente.js';
+import { proximaPagina } from '../comum/paginacao.js';
 
 /**
  * Cliente de API do reg360.
@@ -70,6 +71,24 @@ export const reg360Api = {
     urbiVerso.api(`/propostas/vigente${qs(p)}`),
   criarProposta: (corpo: Partial<Proposta>): Promise<Proposta> =>
     urbiVerso.api('/propostas', JSON_POST(corpo)),
+
+  /**
+   * Todas as propostas, paginando em laço. O agregado de VGV precisa do
+   * conjunto inteiro para resolver a cascata de cada lote sem ir ao servidor
+   * uma vez por imóvel.
+   */
+  listarTodasPropostas: async (): Promise<Proposta[]> => {
+    const acumulado: Proposta[] = [];
+    let pagina: number | null = 1;
+    while (pagina !== null) {
+      const r: any = await urbiVerso.api(`/propostas?pagina=${pagina}&por_pagina=100`);
+      acumulado.push(...(r?.dados || []));
+      pagina = proximaPagina(r, pagina, acumulado.length);
+    }
+    return acumulado;
+  },
+  listarImovelDados: (imovelTipo = 'lote'): Promise<ListaDados<any>> =>
+    urbiVerso.api(`/imovel-dados?imovel_tipo=${imovelTipo}`),
 
   // ---- Dados do imóvel: preços (tabela do app) ----
   imovelDados: (tipo: string, id: number): Promise<any> =>

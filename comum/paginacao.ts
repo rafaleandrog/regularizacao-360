@@ -84,3 +84,33 @@ export function chaveCache(recurso: string, filtros?: Record<string, unknown>): 
     .join('&');
   return ordenado ? `${recurso}?${ordenado}` : recurso;
 }
+
+export interface Paginacao {
+  pagina: number;
+  porPagina: number;
+}
+
+/**
+ * Lê `pagina`/`por_pagina` de uma query string, com clamp.
+ *
+ * Existe porque **rota que aceita o parâmetro e não o repassa falha calada**:
+ * o cliente pede a página 2, recebe a 1, e o laço de varredura acumula
+ * duplicatas achando que avançou. Nada estoura — o número no fim é que está
+ * errado. Como o mesmo par aparece em três rotas de lista, a leitura vira
+ * função pura, testável sem subir Express.
+ *
+ * Valor ausente, zero, negativo ou não-numérico cai no padrão; acima do teto é
+ * clampeado, nunca rejeitado — pedir demais é engano de chamador, não ataque.
+ */
+export function lerPaginacao(
+  query: Record<string, unknown> | undefined,
+  { padrao, max }: { padrao: number; max: number },
+): Paginacao {
+  const inteiro = (v: unknown): number | null => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : null;
+  };
+  const pagina = inteiro(query?.pagina) ?? 1;
+  const pedido = inteiro(query?.por_pagina) ?? padrao;
+  return { pagina, porPagina: Math.min(pedido, max) };
+}

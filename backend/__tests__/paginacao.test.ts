@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   proximaPagina,
   chaveCache,
+  lerPaginacao,
   POR_PAGINA_NUCLEO,
   TETO_PAGINAS,
 } from '../../comum/paginacao.js';
@@ -89,5 +90,34 @@ describe('chaveCache — identidade do conjunto pedido', () => {
 
   test('zero é filtro legítimo e não some', () => {
     assert.equal(chaveCache('lotes', { quantidade: 0 }), 'lotes?quantidade=0');
+  });
+});
+
+
+describe('lerPaginacao — rota que aceita o parâmetro tem que repassá-lo', () => {
+  const limites = { padrao: 100, max: 100 };
+
+  test('query vazia → primeira página, tamanho padrão', () => {
+    assert.deepEqual(lerPaginacao({}, limites), { pagina: 1, porPagina: 100 });
+    assert.deepEqual(lerPaginacao(undefined, limites), { pagina: 1, porPagina: 100 });
+  });
+
+  test('valores válidos passam (chegam como string da query string)', () => {
+    assert.deepEqual(lerPaginacao({ pagina: '3', por_pagina: '50' }, limites), { pagina: 3, porPagina: 50 });
+  });
+
+  test('acima do teto é clampeado, não rejeitado', () => {
+    assert.equal(lerPaginacao({ por_pagina: '5000' }, limites).porPagina, 100);
+  });
+
+  test('lixo, zero e negativo caem no padrão em vez de virar NaN', () => {
+    for (const v of ['abc', '0', '-2', '', 'null']) {
+      assert.deepEqual(lerPaginacao({ pagina: v, por_pagina: v }, limites), { pagina: 1, porPagina: 100 },
+        `valor rejeitado: ${v}`);
+    }
+  });
+
+  test('fracionário trunca — página 2,7 não existe', () => {
+    assert.equal(lerPaginacao({ pagina: '2.7' }, limites).pagina, 2);
   });
 });

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { proximaPagina } from '../comum/paginacao.js';
 import { upsertPorChave } from './upsert.js';
 
 /**
@@ -16,6 +17,8 @@ import { upsertPorChave } from './upsert.js';
  */
 
 const TIPOS = new Set(['lote', 'unidade']);
+/** Teto de cliente do framework de dados: pedir mais devolve fatia, sem erro. */
+const POR_PAGINA = 100;
 
 function erro(res: any, status: number, codigo: string, mensagem: string) {
   return res.status(status).json({ erro: true, codigo, mensagem });
@@ -72,6 +75,28 @@ async function salvar(req: any, imovelId: number, imovelTipo: string, campos: Re
 }
 
 export const rotasImovelDados: ReturnType<typeof Router> = Router();
+
+// GET /api/reg360/imovel-dados — todos, para o VGV agregar no cliente.
+// Existe porque o agregado precisa do preço de CADA lote, e uma requisição por
+// lote seria uma por linha. Pagina em laço pelo mesmo motivo de
+// `parcelamento-dados`: `listar` devolve fatia sem erro quando se pede demais.
+rotasImovelDados.get('/imovel-dados', async (req, res) => {
+  try {
+    const filtros: Record<string, unknown> = {};
+    if (req.query.imovel_tipo) filtros.imovel_tipo = String(req.query.imovel_tipo);
+
+    const acumulado: Record<string, any>[] = [];
+    let pagina: number | null = 1;
+    while (pagina !== null) {
+      const resposta: any = await req.dados!.listar('imovel_dados', { filtros, pagina, por_pagina: POR_PAGINA });
+      acumulado.push(...(resposta?.dados || []));
+      pagina = proximaPagina(resposta, pagina, acumulado.length);
+    }
+    res.json({ dados: acumulado });
+  } catch (err: any) {
+    erro(res, 500, 'REG360_LISTAR_FALHOU', err?.message || 'Falha ao listar dados de imóveis');
+  }
+});
 
 // GET /api/reg360/imovel-dados/:tipo/:id
 rotasImovelDados.get('/imovel-dados/:tipo/:id', async (req, res) => {

@@ -15,6 +15,7 @@ import {
   apenasEditaveis,
   dentroDaJanelaVencimento,
 } from '../comum/cascata.js';
+import { lerPaginacao } from '../comum/paginacao.js';
 
 /**
  * Rotas da app Regularização 360 (reg360).
@@ -29,6 +30,15 @@ import {
  * vencimento entram na Fase 3.
  */
 export const rotas: ReturnType<typeof Router> = Router();
+
+/**
+ * Página das rotas de lista. O framework de dados devolve uma FATIA sem erro
+ * quando se pede mais do que ele entrega — pedir demais não é rejeitado, é
+ * atendido pela metade —, então o clamp existe para o chamador não acreditar
+ * que levou tudo numa página só.
+ */
+const POR_PAGINA_PADRAO = 100;
+const POR_PAGINA_MAX = 100;
 
 // Dados de regularização do Parcelamento — arquivo próprio para este não virar
 // o depósito de tudo conforme as ondas entram.
@@ -120,6 +130,13 @@ rotas.get('/ping', (req, res) => {
 // ---------------------------------------------------------------------------
 
 // GET /api/reg360/propostas — listar com filtros
+//
+// Aceita `pagina`/`por_pagina` porque o agregado de VGV precisa do conjunto
+// INTEIRO de propostas para resolver a cascata de cada lote sem uma requisição
+// por imóvel — e quem varre pagina em laço (`listarTodasPropostas`).
+// A rota ignorava os dois parâmetros: o cliente pedia a página 2 e recebia
+// sempre a primeira, então o acumulado enchia de duplicatas e as propostas do
+// fim nunca chegavam. Falha calada — nada estoura, só o VGV sai errado.
 rotas.get('/propostas', async (req, res) => {
   try {
     const filtros: Record<string, unknown> = {};
@@ -128,11 +145,19 @@ rotas.get('/propostas', async (req, res) => {
     if (req.query.tipo_proposta) filtros.tipo_proposta = req.query.tipo_proposta;
     if (req.query.status_aprovacao) filtros.status_aprovacao = req.query.status_aprovacao;
 
-    const resultado = await req.dados!.listar('propostas', {
+    const { pagina, porPagina } = lerPaginacao(req.query, { padrao: POR_PAGINA_PADRAO, max: POR_PAGINA_MAX });
+    const resultado: any = await req.dados!.listar('propostas', {
       filtros,
       ordenar: 'data_proposta',
       ordem: 'desc',
+      pagina,
+      por_pagina: porPagina,
     });
+    // A resposta sai como veio: `por_pagina` NÃO é inventado aqui. Ecoar o
+    // valor pedido quando o framework entrega menos faria `proximaPagina` ler
+    // "página incompleta = última" na primeira página e truncar a varredura em
+    // silêncio. Sem o eco, a parada fica por conta de `paginas`/`total`, que o
+    // framework preenche, e no pior caso custa uma requisição vazia a mais.
     res.json(resultado);
   } catch (err: any) {
     erro(res, 500, 'REG360_LISTAR_FALHOU', err?.message || 'Falha ao listar propostas');
