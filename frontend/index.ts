@@ -5,6 +5,7 @@ import { reg360Api, type Proposta } from './reg360-api.js';
 import { falhaDeFlag, type FalhaDeFlag } from './nucleo-cliente.js';
 import { filtrarPorTexto, normalizarTexto } from '../comum/busca.js';
 import { mapaComLimite } from '../comum/concorrencia.js';
+import { precoAplicavel, valorDoImovel, aplicarDescontos, type FormaPagamento } from '../comum/preco.js';
 import { badgeStatusParcelamento } from '../comum/status-parcelamento.js';
 import {
   faseRegularizacao, badgeFase, badgeSituacaoRegistral, situacaoRegistralRelevante,
@@ -164,6 +165,10 @@ export class AppReg360 extends LitElement {
   @state() private carregandoPessoas = false;
   /** `parcelamento_id` → dados de regularização do app. */
   @state() private regularizacaoPorParcelamento = new Map<number, any>();
+  /** Dados do imóvel aberto: preços de contrato e manual. */
+  @state() private dadosDoImovel: any = {};
+  /** Modal de preço: qual campo, valor e se é correção de contrato. */
+  @state() private formPreco: { campo: 'estatico' | 'manual' | 'corrigir'; valor: string } | null = null;
   @state() private formRegAberto = false;
   @state() private formReg: Record<string, any> = {};
   /** Parcelamento e incorporação do imóvel aberto, resolvidos para exibir nome. */
@@ -284,6 +289,7 @@ export class AppReg360 extends LitElement {
             // se sabe o setor, e o elo de Setor da cadeia seria pulado — a
             // unidade não herdaria o preço-base que sempre existe lá.
             await this._carregarContextoDoImovel();
+            void this._carregarDadosDoImovel();
             this.vigente = await reg360Api.resolverVigente({
               nivel: this.rota.view,
               ref_id: this.rota.id,
@@ -456,6 +462,33 @@ export class AppReg360 extends LitElement {
       urbiVerso.notificar?.('Regularização atualizada', 'sucesso');
     } catch (e: any) {
       urbiVerso.notificar?.(e?.message || 'Falha ao salvar regularização', 'erro');
+    } finally {
+      this.carregando = false;
+    }
+  }
+
+  private async _carregarDadosDoImovel() {
+    this.dadosDoImovel = {};
+    if (!this.rota.id) return;
+    try {
+      this.dadosDoImovel = await reg360Api.imovelDados(this.rota.view, this.rota.id) || {};
+    } catch (e: any) {
+      this._registrarFalha(e, 'Falha ao carregar preços do imóvel');
+    }
+  }
+
+  /** Preço que vale para o imóvel aberto, com a origem. */
+  private get _precoDoImovel() {
+    return precoAplicavel(this.dadosDoImovel, this.vigente?.vigente);
+  }
+
+  private async _acaoPreco(fn: () => Promise<any>, sucesso: string) {
+    try {
+      this.carregando = true;
+      this.dadosDoImovel = await fn();
+      urbiVerso.notificar?.(sucesso, 'sucesso');
+    } catch (e: any) {
+      urbiVerso.notificar?.(e?.message || 'Falha ao salvar preço', 'erro');
     } finally {
       this.carregando = false;
     }
@@ -639,6 +672,7 @@ export class AppReg360 extends LitElement {
       </urbi-shell-page>
       ${this.formAberto ? this._renderForm() : nothing}
       ${this.formRegAberto ? this._renderFormRegularizacao() : nothing}
+      ${this.formPreco ? this._renderFormPreco() : nothing}
     `;
   }
 
@@ -991,11 +1025,10 @@ export class AppReg360 extends LitElement {
         ? html`<urbi-wrap>${ocupantes.map((v: any) =>
             html`<urbi-badge cor="padrao">${v.nome ?? v.razao_social ?? `#${v.pessoa_id}`}${v.legado ? ' (legado)' : ''}</urbi-badge>`)}</urbi-wrap>`
         : html`<p class="prop-meta">Nenhum morador vinculado.</p>`}
+      ${this._renderPainelPrecos(u)}
       <urbi-wrap>
         <urbi-kpi rotulo="Área (m²)" .valor=${fmtArea(u.area_efetiva ?? u.area)} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Matrícula" .valor=${mat ? nomeDe(mat) : '—'} formato="texto"></urbi-kpi>
-        <urbi-kpi rotulo="Proposta vigente (R$/m²)"
-          .valor=${this.vigente?.vigente ? fmtMoeda(this.vigente.vigente.preco_m2) : '—'} formato="texto"></urbi-kpi>
       </urbi-wrap>
       ${this.unidadesDoLote.length > 0
         ? html`
@@ -1104,6 +1137,132 @@ export class AppReg360 extends LitElement {
               </div>
             `)}
           </urbi-stack>`}
+    `;
+  }
+
+  /**
+   * Os três preços do legado, mais o valor do imóvel.
+   *
+   * A ORIGEM do preço final é escrita, não deduzível: três números sem dizer
+   * qual está valendo é exatamente o que faz alguém "corrigir uma fórmula por
+   * engano" — o risco que o preço de contrato existe para evitar.
+   */
+  private _renderPainelPrecos(u: any): TemplateResult {
+    const d = this.dadosDoImovel || {};
+    const vigente = this.vigente?.vigente;
+    const { valor: preco, origem } = this._precoDoImovel;
+    const area = u.area_efetiva ?? u.area;
+    const valor = valorDoImovel(preco, area);
+    const ROTULO_ORIGEM: Record<string, string> = {
+      estatico: 'contrato gravado',
+      manual: 'preço manual',
+      proposta: `proposta vigente${this.vigente?.origem_cascata ? ` (${NIVEL_LABEL[this.vigente.origem_cascata] ?? ''})` : ''}`,
+    };
+    const formas: Array<[FormaPagamento, string]> = [['a_vista', 'À vista'], ['6x', '6×'], ['12x', '12×']];
+    const temDesconto = vigente && formas.some(([f]) => aplicarDescontos(preco, vigente, f, area) !== preco);
+
+    return html`
+      <urbi-wrap>
+        <urbi-kpi rotulo="Valor do imóvel" .valor=${valor === null ? '—' : fmtMoeda(valor)} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Preço proposta vigente (R$/m²)"
+          .valor=${vigente ? fmtMoeda(vigente.preco_m2) : '—'} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Preço de contrato (R$/m²)"
+          .valor=${d.preco_estatico != null ? fmtMoeda(d.preco_estatico) : '—'} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Preço final (R$/m²)"
+          .valor=${preco === null ? '—' : fmtMoeda(preco)} formato="texto"></urbi-kpi>
+      </urbi-wrap>
+      <p class="prop-meta">
+        ${origem
+          ? html`Preço final vem de <strong>${ROTULO_ORIGEM[origem]}</strong>.`
+          : html`Sem preço definido: não há contrato, preço manual, nem proposta vigente na cascata.`}
+        ${d.preco_estatico != null && d.preco_estatico_em
+          ? html` Contrato gravado em ${fmtData(d.preco_estatico_em)}${d.preco_estatico_por_nome ? ` por ${d.preco_estatico_por_nome}` : ''}.`
+          : nothing}
+      </p>
+
+      ${temDesconto
+        ? html`<p class="prop-meta">Com os descontos da proposta:
+            ${formas.map(([f, rot]) => {
+              const p = aplicarDescontos(preco, vigente, f, area);
+              return html`<span> · ${rot}: ${p === null ? '—' : fmtMoeda(p)}/m²</span>`;
+            })}
+          </p>`
+        : nothing}
+
+      ${this.podeCriar
+        ? html`<div class="barra-acoes">
+            ${d.preco_estatico == null
+              ? html`<urbi-botao variante="secundario" pequeno icone="fa-solid fa-file-signature"
+                  @click=${() => this._abrirPreco('estatico')}>Gravar preço de contrato</urbi-botao>`
+              : this.podeCriar && urbiVerso.contexto?.()?.nivelApp === 'admin'
+                ? html`<urbi-botao variante="perigo" pequeno icone="fa-solid fa-triangle-exclamation"
+                    @click=${() => this._abrirPreco('corrigir')}>Corrigir preço de contrato</urbi-botao>`
+                : nothing}
+            <urbi-botao variante="fantasma" pequeno icone="fa-solid fa-pen"
+              @click=${() => this._abrirPreco('manual')}>Definir preço manual</urbi-botao>
+            ${d.preco_m2_manual != null
+              ? html`<urbi-botao variante="fantasma" pequeno
+                  @click=${() => this._acaoPreco(() => reg360Api.salvarPrecoManual(this.rota.view, Number(u.id), null), 'Preço manual removido')}>Limpar manual</urbi-botao>`
+              : nothing}
+          </div>`
+        : nothing}
+    `;
+  }
+
+  private _abrirPreco(campo: 'estatico' | 'manual' | 'corrigir') {
+    const d = this.dadosDoImovel || {};
+    const atual = campo === 'manual' ? d.preco_m2_manual : d.preco_estatico;
+    this.formPreco = { campo, valor: atual != null && campo === 'corrigir' ? String(atual) : '' };
+  }
+
+  private _renderFormPreco(): TemplateResult {
+    const f = this.formPreco!;
+    const u = this.detalhe;
+    const titulo = f.campo === 'manual'
+      ? 'Definir preço manual'
+      : f.campo === 'estatico' ? 'Gravar preço de contrato' : 'Corrigir preço de contrato';
+
+    const salvar = () => {
+      const bruto = f.valor.trim();
+      // Vazio só é intenção legítima na correção (apagar) — nos outros dois,
+      // salvar em branco não quer dizer nada.
+      if (!bruto && f.campo !== 'corrigir') return urbiVerso.notificar?.('Informe um valor', 'erro');
+      const n = bruto === '' ? null : Number(bruto.replace(',', '.'));
+      if (n !== null && (!Number.isFinite(n) || n < 0)) return urbiVerso.notificar?.('Valor inválido', 'erro');
+      const id = Number(u.id);
+      const acao =
+        f.campo === 'manual' ? () => reg360Api.salvarPrecoManual(this.rota.view, id, n)
+        : f.campo === 'estatico' ? () => reg360Api.gravarPrecoEstatico(this.rota.view, id, n as number)
+        : () => reg360Api.corrigirPrecoEstatico(this.rota.view, id, n);
+      this.formPreco = null;
+      void this._acaoPreco(acao, 'Preço atualizado');
+    };
+
+    return html`
+      <urbi-modal title=${titulo} @urbi-modal:close=${() => { this.formPreco = null; }}>
+        ${f.campo === 'estatico'
+          ? html`<urbi-banner variante="alerta">
+              O preço de contrato registra um valor <strong>firmado</strong>. Uma vez gravado, só o
+              admin da app consegue alterá-lo — é o que impede que ele se perca numa mudança de fórmula.
+            </urbi-banner>`
+          : nothing}
+        ${f.campo === 'corrigir'
+          ? html`<urbi-banner variante="erro">
+              Você vai <strong>substituir</strong> o registro de um contrato firmado
+              (atual: ${fmtMoeda(this.dadosDoImovel?.preco_estatico)}/m²). Deixe em branco para apagá-lo.
+            </urbi-banner>`
+          : nothing}
+        ${f.campo === 'manual'
+          ? html`<p class="prop-meta">Sobrepõe a proposta vigente, mas <strong>não</strong> o preço de contrato.</p>`
+          : nothing}
+        <urbi-input label="Preço por m² (R$)" tipo="number" .valor=${f.valor}
+          @urbi:input-change=${(e: CustomEvent) => { this.formPreco = { ...f, valor: String(e.detail.valor ?? '') }; }}></urbi-input>
+        <div class="barra-acoes" style="margin-top:16px">
+          <urbi-botao variante="fantasma" @click=${() => { this.formPreco = null; }}>Cancelar</urbi-botao>
+          <urbi-botao variante=${f.campo === 'corrigir' ? 'perigo' : 'primario'}
+            ?carregando=${this.carregando} @click=${salvar}>Salvar</urbi-botao>
+        </div>
+      </urbi-modal>
     `;
   }
 
