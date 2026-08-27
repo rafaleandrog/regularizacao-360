@@ -248,6 +248,9 @@ rotas.post('/propostas/:id/aprovar', async (req, res) => {
       status_aprovacao: 'aprovada',
       aprovado_por_id: req.contexto?.usuario?.id ?? null,
     });
+    // `atualizar` devolve null quando a linha nao existe mais — a proposta pode
+    // ter sido removida entre o `buscar` acima e este update.
+    if (!aprovada) return erro(res, 404, 'REG360_NAO_ENCONTRADA', 'Proposta não encontrada');
 
     await publicarSeguro(req, 'proposta_aprovada', {
       proposta_id: aprovada.id,
