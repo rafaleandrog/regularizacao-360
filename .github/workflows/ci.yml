@@ -1,0 +1,40 @@
+# CI de pull request da app `reg360`.
+#
+# Existe porque o repo só tinha o workflow de release (disparado por tag), então
+# um PR podia quebrar `pnpm build` e o repo só descobrir no dia do release.
+# Aqui não se cria tag, não se publica release e não se escreve no repositório.
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  packages: read
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://npm.pkg.github.com'
+      - name: Instalar dependências
+        # Sem --frozen-lockfile: o repo ainda não tem pnpm-lock.yaml commitado
+        # (o SDK privado exige token, gerado só localmente). Ao commitar o
+        # lockfile, trocar aqui e no release.yml. Ver issue #3.
+        run: pnpm install --no-frozen-lockfile
+        env:
+          # @urbiverso/sdk é privado (GitHub Packages, org urbiverso). O GITHUB_TOKEN
+          # efêmero deste repo NÃO tem read:packages cross-org (401), então usamos o
+          # PAT guardado no secret URBIVERSO_PACKAGES_TOKEN.
+          NODE_AUTH_TOKEN: ${{ secrets.URBIVERSO_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Testes
+        run: pnpm test
+      - name: Build
+        run: pnpm build

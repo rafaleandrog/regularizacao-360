@@ -1,3 +1,7 @@
+// Augmentation OPCIONAL do Express: tipa os helpers que o shell injeta em
+// `req` (dados, contexto, eventos, shell, nucleo...). O SDK não a aplica pelo
+// barrel — sem esta linha, `req.dados` não existe para o tsc.
+import '@urbiverso/sdk/express';
 import { Router } from 'express';
 import {
   hoje,
