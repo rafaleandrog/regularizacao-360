@@ -14,7 +14,7 @@ A UP opera a regularização de condomínios informais na Fazenda Paranoazinho. 
 
 O app centraliza tudo no UrbiVerso, com:
 
-- Navegação hierárquica: Setor Habitacional → Parcelamento → Lote → Unidade (dados do Núcleo)
+- Navegação hierárquica: Setor Habitacional → Parcelamento → **Lote** (dados do Núcleo)
 - Gestão de propostas comerciais com resolução em cascata (Setor → Parcelamento → Unidade)
 - Dashboard de KPIs (áreas, contagens; VGV quando Transação existir no Núcleo)
 - Fluxo de aprovação de propostas com roles (`criador`, `validador_interno`, `editor_regularizacao`)
@@ -31,7 +31,9 @@ Toda leitura passa por `frontend/nucleo-cliente.ts`, que pagina em laço, memori
 | `/setor/:id` | Detalhe do Setor — KPIs, abas Empreendimentos e Propostas |
 | `/parcelamentos` | Lista de Parcelamentos (cards), com busca |
 | `/parcelamentos/setor/:id` | A mesma lista, filtrada por Setor |
-| `/parcelamento/:id` | Detalhe do Parcelamento |
+| `/parcelamento/:id` | Detalhe do Parcelamento — KPIs, abas Lotes e Propostas |
+| `/lote/:id` | Detalhe do Lote |
+| `/unidade/:id` | Detalhe da Unidade (só onde há incorporação) |
 | `/proposta/:id` | Detalhe da Proposta |
 
 O filtro de Setor vai **na sub-rota**, não em query string: `subRota()` do shell é montada só do `pathname`, então `?setor=2` não chegaria à app. Como está, a tela filtrada é compartilhável e o botão voltar do navegador funciona.

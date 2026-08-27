@@ -3,7 +3,8 @@ import { customElement, state } from 'lit/decorators.js';
 import { urbiVerso } from './reg360-env.js';
 import { reg360Api, type Proposta } from './reg360-api.js';
 import { falhaDeFlag, type FalhaDeFlag } from './nucleo-cliente.js';
-import { filtrarPorTexto } from '../comum/busca.js';
+import { filtrarPorTexto, normalizarTexto } from '../comum/busca.js';
+import { mapaComLimite } from '../comum/concorrencia.js';
 import { badgeStatusParcelamento } from '../comum/status-parcelamento.js';
 import { soData } from '../comum/cascata.js';
 
@@ -17,8 +18,21 @@ import { soData } from '../comum/cascata.js';
 const NIVEL_LABEL: Record<string, string> = {
   setor: 'Setor Habitacional',
   parcelamento: 'Parcelamento',
+  lote: 'Lote',
   unidade: 'Unidade',
 };
+
+/**
+ * Quantos lotes por página na tabela do Parcelamento.
+ *
+ * Pequeno de propósito: a coluna "Pessoas" custa UMA requisição por linha —
+ * o Núcleo não expõe `imovel_pessoas` em lote — então o tamanho da página é o
+ * número de requisições por virada.
+ */
+const LOTES_POR_PAGINA = 25;
+
+/** Requisições simultâneas ao buscar ocupantes. Janela, não enxurrada. */
+const LIMITE_SIMULTANEO = 6;
 
 const TIPO_OPCOES = [
   { valor: 'tabela', rotulo: 'Tabela' },
@@ -50,7 +64,7 @@ function nomeDe(o: any): string {
 }
 
 interface Rota {
-  view: 'home' | 'parcelamentos' | 'unidades' | 'setor' | 'parcelamento' | 'unidade' | 'proposta';
+  view: 'home' | 'parcelamentos' | 'unidades' | 'setor' | 'parcelamento' | 'lote' | 'unidade' | 'proposta';
   id: number | null;
   /**
    * Filtro de Setor da lista de Parcelamentos. Vai na sub-rota
@@ -73,6 +87,7 @@ function parseRota(sub: string): Rota {
     case 'unidades': return { view: 'unidades', id: null };
     case 'setor': return { view: 'setor', id };
     case 'parcelamento': return { view: 'parcelamento', id };
+    case 'lote': return { view: 'lote', id };
     case 'unidade': return { view: 'unidade', id };
     case 'proposta': return { view: 'proposta', id };
     default: return { view: 'home', id: null };
@@ -117,6 +132,16 @@ export class AppReg360 extends LitElement {
 
   /** Termo digitado na busca. Transitório de propósito: não vai para a rota. */
   @state() private termoBusca = '';
+  /** Endereço é local e barato; morador exige carregar ocupantes de todo o parcelamento. */
+  @state() private modoBusca: 'endereco' | 'morador' = 'endereco';
+
+  @state() private lotes: any[] = [];
+  @state() private paginaLotes = 1;
+  /** `matricula_id` → matrícula, para a tabela não exibir id cru. */
+  @state() private matriculasPorId = new Map<number, any>();
+  /** `lote.id` → ocupantes. Preenchido sob demanda, página a página. */
+  @state() private pessoasPorLote = new Map<number, any[]>();
+  @state() private carregandoPessoas = false;
 
   /** Flag de Núcleo negada — vira banner explicável, nunca lista vazia. */
   @state() private avisoFlag: FalhaDeFlag | null = null;
@@ -202,22 +227,33 @@ export class AppReg360 extends LitElement {
           break;
         case 'parcelamento':
           if (this.rota.id) {
-            this.abaDetalhe = 'unidades';
+            this.abaDetalhe = 'lotes';
+            this.paginaLotes = 1;
+            this.termoBusca = '';
             this.detalhe = await reg360Api.parcelamento(this.rota.id);
-            this.unidades = await reg360Api.unidades({ parcelamento_id: this.rota.id });
+            // `parcelamento_id` É filtro válido em GET /lotes (ao contrário de
+            // `unidades`, que nem tem essa coluna).
+            this.lotes = await reg360Api.lotes({ parcelamento_id: this.rota.id });
             await this._carregarPropostas('parcelamento', this.rota.id);
+            void this._carregarMatriculas();
+            void this._carregarPessoasDaPagina();
           }
           break;
+        case 'lote':
         case 'unidade':
           if (this.rota.id) {
             this.abaDetalhe = 'propostas';
-            this.detalhe = await reg360Api.unidade(this.rota.id);
-            await this._carregarPropostas('unidade', this.rota.id);
+            const ehLote = this.rota.view === 'lote';
+            this.detalhe = ehLote
+              ? await reg360Api.lote(this.rota.id)
+              : await reg360Api.unidade(this.rota.id);
+            await this._carregarPropostas(this.rota.view, this.rota.id);
+            if (ehLote) this.pessoasPorLote = new Map([[this.rota.id, await reg360Api.pessoasDoLote(this.rota.id)]]);
+            void this._carregarMatriculas();
             this.vigente = await reg360Api.resolverVigente({
-              nivel: 'unidade',
+              nivel: this.rota.view,
               ref_id: this.rota.id,
               parcelamento_id: this.detalhe?.parcelamento_id,
-              setor_id: this.detalhe?.setor_habitacional_id,
             });
           }
           break;
@@ -269,6 +305,81 @@ export class AppReg360 extends LitElement {
     } finally {
       this.varrendoLotes = false;
     }
+  }
+
+  /**
+   * Índice de matrículas. O payload do lote traz só `matricula_id` e a área da
+   * matrícula — não o número. E `GET /matriculas` **não aceita filtro por id**
+   * (só `busca` por numero/cri/uf), então não dá para pedir as 38 de um
+   * parcelamento: ou se varre tudo uma vez e memoriza, ou se faz uma requisição
+   * por lote. A varredura ganha, e o cache a paga uma vez por sessão.
+   */
+  private async _carregarMatriculas() {
+    if (this.matriculasPorId.size > 0) return;
+    try {
+      const mats = await reg360Api.matriculas();
+      this.matriculasPorId = new Map(mats.map((m: any) => [Number(m.id), m]));
+    } catch (e: any) {
+      // Degrada a coluna Matrícula, não a tela.
+      this._registrarFalha(e, 'Falha ao carregar matrículas');
+    }
+  }
+
+  /** Lotes visíveis na página atual, já filtrados. */
+  private get _lotesFiltrados(): any[] {
+    if (this.modoBusca === 'morador') {
+      const alvo = normalizarTexto(this.termoBusca);
+      if (!alvo) return this.lotes;
+      return this.lotes.filter((l) =>
+        (this.pessoasPorLote.get(Number(l.id)) || []).some((v: any) =>
+          normalizarTexto(v?.nome ?? v?.razao_social).includes(alvo),
+        ),
+      );
+    }
+    return filtrarPorTexto(this.lotes, this.termoBusca, [
+      'id_legivel', 'numero_lote', 'quadra', 'conjunto', 'rua',
+    ]);
+  }
+
+  private get _lotesDaPagina(): any[] {
+    const ini = (this.paginaLotes - 1) * LOTES_POR_PAGINA;
+    return this._lotesFiltrados.slice(ini, ini + LOTES_POR_PAGINA);
+  }
+
+  /**
+   * Ocupantes dos lotes visíveis. Uma requisição por lote (o Núcleo não expõe
+   * `imovel_pessoas` em lote), com janela de simultâneos e cache por lote.
+   */
+  private async _carregarPessoasDaPagina(lotes?: any[]) {
+    const alvo = (lotes ?? this._lotesDaPagina).filter((l) => !this.pessoasPorLote.has(Number(l.id)));
+    if (alvo.length === 0) return;
+    this.carregandoPessoas = true;
+    try {
+      const resultados = await mapaComLimite<any, [number, any[]]>(alvo, LIMITE_SIMULTANEO, async (l) => {
+        try {
+          return [Number(l.id), await reg360Api.pessoasDoLote(Number(l.id))];
+        } catch {
+          // Um lote que falha não derruba a página inteira.
+          return [Number(l.id), []];
+        }
+      });
+      const mapa = new Map(this.pessoasPorLote);
+      for (const [id, pessoas] of resultados) mapa.set(id, pessoas);
+      this.pessoasPorLote = mapa;
+    } finally {
+      this.carregandoPessoas = false;
+    }
+  }
+
+  /**
+   * Buscar por morador exige os ocupantes de TODO o parcelamento, porque o
+   * filtro não existe no Núcleo. É por isso que o modo é escolhido
+   * explicitamente, e não inferido do que o usuário digita.
+   */
+  private async _trocarModoBusca(modo: 'endereco' | 'morador') {
+    this.modoBusca = modo;
+    this.paginaLotes = 1;
+    if (modo === 'morador') await this._carregarPessoasDaPagina(this.lotes);
   }
 
   /** Agregado de um conjunto de parcelamentos (setor, ou a instância toda). */
@@ -419,7 +530,8 @@ export class AppReg360 extends LitElement {
       case 'unidades': return this._renderListaUnidades();
       case 'setor': return this._renderDetalheSetor();
       case 'parcelamento': return this._renderDetalheParcelamento();
-      case 'unidade': return this._renderDetalheUnidade();
+      case 'lote':
+      case 'unidade': return this._renderDetalheImovel();
       case 'proposta': return this._renderProposta();
       default: return html`${nothing}`;
     }
@@ -583,45 +695,124 @@ export class AppReg360 extends LitElement {
     const p = this.detalhe;
     if (!p) return html`<urbi-loading></urbi-loading>`;
     const b = badgeStatusParcelamento(p.status);
+    const setor = this._nomeSetor(p.setor_habitacional_id);
+    const areaLotes = this.lotes.reduce((soma, l) => soma + (Number(l.area_efetiva ?? l.area ?? 0) || 0), 0);
     return html`
       <urbi-botao variante="fantasma" icone="fa-solid fa-arrow-left" pequeno @click=${() => this._navegar('/parcelamentos')}>Voltar</urbi-botao>
-      <h2>${nomeDe(p)} <urbi-badge cor=${b.cor}>${b.label}</urbi-badge></h2>
+      <h2>${nomeDe(p)}</h2>
       <urbi-wrap>
-        <urbi-kpi rotulo="Unidades" .valor=${this.unidades.length} formato="numero"></urbi-kpi>
-        <urbi-kpi rotulo="Área poligonal (m²)" .valor=${p.area_poligonal ?? '—'} formato="texto"></urbi-kpi>
+        ${setor ? html`<urbi-badge cor="padrao">${setor}</urbi-badge>` : nothing}
+        <urbi-badge cor=${b.cor}>${b.label}</urbi-badge>
+      </urbi-wrap>
+      <div class="prop-meta">${p.slug ?? ''}</div>
+      <urbi-wrap>
+        <urbi-kpi rotulo="Lotes" .valor=${this.lotes.length} formato="numero"></urbi-kpi>
+        <urbi-kpi rotulo="Área do parcelamento (m²)" .valor=${fmtArea(p.area)} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Área dos lotes (m²)" .valor=${fmtArea(areaLotes)} formato="texto"></urbi-kpi>
       </urbi-wrap>
       <urbi-abas
         .abas=${[
-          { id: 'unidades', label: 'Unidades' },
+          { id: 'lotes', label: 'Lotes' },
           { id: 'propostas', label: 'Propostas Vigentes' },
         ]}
         ativa=${this.abaDetalhe}
         @urbi:aba-selecionar=${(e: CustomEvent) => { this.abaDetalhe = e.detail.id; }}
       ></urbi-abas>
-      ${this.abaDetalhe === 'unidades'
-        ? html`<urbi-tabela clicavel
-            .colunas=${[
-              { id: 'ident', label: 'Identificação', valor: (l: any) => nomeDe(l) },
-              { id: 'area', label: 'Área (m²)', alinhamento: 'direita', valor: (l: any) => String(l.area_efetiva ?? l.area ?? '—') },
-            ]}
-            .linhas=${this.unidades}
-            @urbi:tabela-click=${(e: CustomEvent) => this._navegar(`/unidade/${e.detail.linha.id}`)}
-          ></urbi-tabela>`
-        : this._renderPropostasVigentes('parcelamento', p.id)}
+      ${this.abaDetalhe === 'lotes' ? this._renderTabelaLotes() : this._renderPropostasVigentes('parcelamento', p.id)}
     `;
   }
 
-  private _renderDetalheUnidade(): TemplateResult {
+  private _renderTabelaLotes(): TemplateResult {
+    const filtrados = this._lotesFiltrados;
+    const daPagina = this._lotesDaPagina;
+    const paginas = Math.max(1, Math.ceil(filtrados.length / LOTES_POR_PAGINA));
+    return html`
+      <urbi-wrap>
+        <urbi-chips-atalho
+          .opcoes=${[
+            { id: 'endereco', rotulo: 'Buscar por endereço' },
+            { id: 'morador', rotulo: 'Buscar por morador' },
+          ]}
+          ativo=${this.modoBusca}
+          @urbi:chip-atalho:click=${(e: CustomEvent) => this._trocarModoBusca(e.detail.id)}
+        ></urbi-chips-atalho>
+      </urbi-wrap>
+      <urbi-input
+        label=${this.modoBusca === 'morador' ? 'Nome do morador' : 'Endereço (quadra, conjunto, rua, lote)'}
+        .valor=${this.termoBusca}
+        @urbi:input-change=${(e: CustomEvent) => { this.termoBusca = String(e.detail.valor ?? ''); this.paginaLotes = 1; }}
+      ></urbi-input>
+      ${this.modoBusca === 'morador' && this.carregandoPessoas
+        ? html`<p class="prop-meta">Carregando ocupantes do parcelamento…</p>`
+        : nothing}
+
+      <urbi-tabela
+        clicavel
+        ?carregando=${this.carregando && this.lotes.length === 0}
+        mensagemVazio=${this.lotes.length === 0 ? 'Nenhum lote neste parcelamento' : 'Nenhum lote com esse filtro'}
+        .colunas=${[
+          { id: 'endereco', label: 'Endereço', valor: (l: any) => nomeDe(l) },
+          { id: 'matricula', label: 'Matrícula', valor: (l: any) => {
+              const m = this.matriculasPorId.get(Number(l.matricula_id));
+              return m ? nomeDe(m) : (l.matricula_id ? '…' : '—');
+            } },
+          { id: 'area', label: 'Área (m²)', alinhamento: 'direita', valor: (l: any) => fmtArea(l.area_efetiva ?? l.area) },
+          { id: 'pessoas', label: 'Pessoas', render: (l: any) => {
+              const vinculos = this.pessoasPorLote.get(Number(l.id));
+              if (!vinculos) return html`<span class="prop-meta">…</span>`;
+              if (vinculos.length === 0) return html`<span class="prop-meta">—</span>`;
+              return html`<urbi-wrap>${vinculos.map((v: any) =>
+                html`<urbi-badge cor="padrao">${v.nome ?? v.razao_social ?? `#${v.pessoa_id}`}</urbi-badge>`)}</urbi-wrap>`;
+            } },
+        ]}
+        .linhas=${daPagina}
+        @urbi:tabela-click=${(e: CustomEvent) => this._navegar(`/lote/${e.detail.linha.id}`)}
+      ></urbi-tabela>
+
+      ${paginas > 1
+        ? html`<div class="barra-acoes">
+            <urbi-botao variante="fantasma" pequeno ?desabilitado=${this.paginaLotes <= 1}
+              @click=${() => this._irParaPaginaLotes(this.paginaLotes - 1)}>Anterior</urbi-botao>
+            <span class="prop-meta">Página ${this.paginaLotes} de ${paginas} · ${filtrados.length} lotes</span>
+            <urbi-botao variante="fantasma" pequeno ?desabilitado=${this.paginaLotes >= paginas}
+              @click=${() => this._irParaPaginaLotes(this.paginaLotes + 1)}>Próxima</urbi-botao>
+          </div>`
+        : nothing}
+    `;
+  }
+
+  private _irParaPaginaLotes(pagina: number) {
+    this.paginaLotes = pagina;
+    void this._carregarPessoasDaPagina();
+  }
+
+  /**
+   * Detalhe de Lote ou Unidade. Na prática quase sempre Lote: no Núcleo,
+   * `unidades` só existe sob incorporação, e a maioria dos lotes não tem uma.
+   */
+  private _renderDetalheImovel(): TemplateResult {
     const u = this.detalhe;
     if (!u) return html`<urbi-loading></urbi-loading>`;
+    const ehLote = this.rota.view === 'lote';
+    const mat = this.matriculasPorId.get(Number(u.matricula_id));
+    const ocupantes = this.pessoasPorLote.get(Number(u.id)) || [];
+    const voltar = ehLote && u.parcelamento_id ? `/parcelamento/${u.parcelamento_id}` : '/parcelamentos';
     return html`
-      <urbi-botao variante="fantasma" icone="fa-solid fa-arrow-left" pequeno @click=${() => this._navegar('/unidades')}>Voltar</urbi-botao>
+      <urbi-botao variante="fantasma" icone="fa-solid fa-arrow-left" pequeno @click=${() => this._navegar(voltar)}>Voltar</urbi-botao>
       <h2>${nomeDe(u)}</h2>
+      ${ocupantes.length > 0
+        ? html`<urbi-wrap>${ocupantes.map((v: any) =>
+            html`<urbi-badge cor="padrao">${v.nome ?? v.razao_social ?? `#${v.pessoa_id}`}</urbi-badge>`)}</urbi-wrap>`
+        : nothing}
       <urbi-wrap>
-        <urbi-kpi rotulo="Área (m²)" .valor=${u.area_efetiva ?? u.area ?? '—'} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Área (m²)" .valor=${fmtArea(u.area_efetiva ?? u.area)} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Matrícula" .valor=${mat ? nomeDe(mat) : '—'} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Proposta vigente (R$/m²)"
           .valor=${this.vigente?.vigente ? fmtMoeda(this.vigente.vigente.preco_m2) : '—'} formato="texto"></urbi-kpi>
       </urbi-wrap>
+      ${u.area == null && u.area_matricula != null
+        ? html`<p class="prop-meta">Área herdada da matrícula — o lote não tem área própria registrada.</p>`
+        : nothing}
       ${this.vigente?.vigente
         ? html`<p class="prop-meta">Preço vigente herdado de: <strong>${NIVEL_LABEL[this.vigente.origem_cascata || ''] || '—'}</strong></p>`
         : nothing}
@@ -636,7 +827,7 @@ export class AppReg360 extends LitElement {
       ${this.abaDetalhe === 'transacoes'
         ? html`<urbi-estado-vazio icone="fa-solid fa-clock" mensagem="Transações em breve"
             submensagem="Disponível quando a entidade Transação existir no Núcleo."></urbi-estado-vazio>`
-        : this._renderPropostasVigentes('unidade', u.id)}
+        : this._renderPropostasVigentes(this.rota.view, u.id)}
     `;
   }
 
@@ -665,11 +856,19 @@ export class AppReg360 extends LitElement {
   }
 
   private _renderPropostasVigentes(nivel: string, refId: number): TemplateResult {
+    // `schema.json` ainda aceita só setor|parcelamento|unidade em `nivel`.
+    // Oferecer "Criar Proposta" num Lote produziria um 422 — botão que só
+    // falha é pior que botão ausente. A issue #23 abre o quarto nível e a #24
+    // completa a cascata; até lá, o Lote lista o que existe e herda o preço.
+    const podeCriarNesteNivel = this.podeCriar && nivel !== 'lote';
     return html`
-      ${this.podeCriar
+      ${podeCriarNesteNivel
         ? html`<div class="barra-acoes">
             <urbi-botao variante="primario" icone="fa-solid fa-plus" @click=${() => this._abrirCriar(nivel, refId)}>Criar Proposta</urbi-botao>
-          </div>` : nothing}
+          </div>`
+        : nivel === 'lote' && this.podeCriar
+          ? html`<p class="prop-meta">Proposta por Lote chega com a issue #23 — por ora, crie no Parcelamento ou no Setor.</p>`
+          : nothing}
       ${this.propostas.length === 0
         ? html`<urbi-estado-vazio icone="fa-solid fa-file-invoice-dollar" mensagem="Nenhuma proposta neste nível"></urbi-estado-vazio>`
         : html`<urbi-stack>
@@ -686,7 +885,7 @@ export class AppReg360 extends LitElement {
                   <urbi-botao variante="fantasma" pequeno @click=${() => this._navegar(`/proposta/${p.id}`)}>Detalhes</urbi-botao>
                   ${p.status_aprovacao === 'pendente' && this.podeAprovar
                     ? html`<urbi-botao variante="sucesso" pequeno @click=${() => this._aprovar(p)}>Aprovar</urbi-botao>` : nothing}
-                  ${this.podeCriar
+                  ${podeCriarNesteNivel
                     ? html`<urbi-botao variante="secundario" pequeno @click=${() => this._abrirCopiar(p)}>Copiar</urbi-botao>` : nothing}
                 </div>
               </div>

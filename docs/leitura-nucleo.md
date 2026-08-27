@@ -74,6 +74,21 @@ Os 60 parcelamentos já estão em memória — o cliente varre e memoriza o conj
 
 A regra geral continua valendo ao contrário: **quando o conjunto não cabe em memória, o filtro é do Núcleo**. A tabela de Lotes de um parcelamento grande pagina e filtra no servidor; a lista de 60 parcelamentos, não.
 
+## Dois custos que o Núcleo impõe, e não dá para contornar
+
+Ambos vêm da mesma raiz: o Núcleo não oferece **leitura em lote por lista de ids**, e a app não pode mudar isso — o monorepo é somente leitura para este trabalho.
+
+**Matrícula na tabela de Lotes.** O payload do lote traz `matricula_id` e `area_matricula`, mas **não** o número da matrícula. E `GET /matriculas` não aceita filtro por id (só `busca` por `numero`/`cri`/`uf`), então não dá para pedir "as 38 matrículas deste parcelamento". Ou se varre o conjunto inteiro uma vez e memoriza, ou se faz uma requisição por lote. A varredura ganha: ~25 requisições pagas uma vez por sessão, contra centenas.
+
+**Ocupantes na tabela de Lotes.** `imovel_pessoas` só é alcançável em `GET /lotes/:id/pessoas` — não há expansão de vínculo na listagem de lotes, nem na de imóveis, nem na de pessoas. Mostrar quem ocupa cada lote custa **uma requisição por linha**.
+
+Daí duas decisões da tela:
+
+- A tabela pagina em **25 linhas**, pequeno de propósito: o tamanho da página é o número de requisições por virada.
+- As requisições saem numa **janela de 6 simultâneas** (`comum/concorrencia.ts`), não de uma vez — 25 em paralelo estouram o limite de conexões do navegador e enfileiram de forma imprevisível.
+
+E daí a busca por morador ser um **modo explícito**, não inferido do que se digita: ela exige carregar os ocupantes de todo o parcelamento. O usuário escolhe pagar esse custo; a tela não o cobra por conta própria.
+
 ## O que não fazer
 
 - **Não chame `urbiVerso.nucleo` de dentro de uma tela.** Perde cache, paginação e o tratamento de flag.

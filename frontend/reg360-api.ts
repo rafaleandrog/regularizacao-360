@@ -83,9 +83,16 @@ export const reg360Api = {
   parcelamentos: (p?: Record<string, string | number>): Promise<any[]> =>
     nucleo.listarTudo('parcelamentos', p),
   parcelamento: (id: number): Promise<any> => nucleo.buscar('parcelamentos', id),
-  unidades: (p?: Record<string, string | number>): Promise<any[]> =>
+  // `unidades` só existe sob incorporação no Núcleo — `incorporacao_id` é NOT
+  // NULL e não há coluna `parcelamento_id`. Por isso o filtro aqui é por
+  // incorporação, e o objeto de navegação da app é o LOTE.
+  unidades: (p?: { incorporacao_id: number }): Promise<any[]> =>
     nucleo.listarTudo('unidades', p),
   unidade: (id: number): Promise<any> => nucleo.buscar('unidades', id),
   lotes: (p?: Record<string, string | number>): Promise<any[]> =>
     nucleo.listarTudo('lotes', p),
+  lote: (id: number): Promise<any> => nucleo.buscar('lotes', id),
+  matriculas: (): Promise<any[]> => nucleo.listarTudo('matriculas'),
+  /** Ocupantes do lote (`imovel_pessoas`). Uma requisição por lote — ver o cliente. */
+  pessoasDoLote: (id: number): Promise<any[]> => nucleo.listarSubRecurso('lotes', id, 'pessoas'),
 };
