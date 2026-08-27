@@ -69,6 +69,11 @@ export const reg360Api = {
     urbiVerso.api(`/propostas/vigente${qs(p)}`),
   criarProposta: (corpo: Partial<Proposta>): Promise<Proposta> =>
     urbiVerso.api('/propostas', JSON_POST(corpo)),
+
+  // ---- Dados de regularização do Parcelamento (tabela do app) ----
+  listarParcelamentoDados: (): Promise<ListaDados<any>> => urbiVerso.api('/parcelamento-dados'),
+  salvarParcelamentoDados: (parcelamentoId: number, corpo: Record<string, unknown>): Promise<any> =>
+    urbiVerso.api(`/parcelamento-dados/${parcelamentoId}`, JSON_POST(corpo, 'PUT')),
   aprovarProposta: (id: number): Promise<Proposta> =>
     urbiVerso.api(`/propostas/${id}/aprovar`, JSON_POST(undefined)),
   copiarProposta: (id: number, corpo: Partial<Proposta>): Promise<Proposta> =>

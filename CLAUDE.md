@@ -55,6 +55,8 @@ Os quatro limpos, e o CI de PR verde. O CI roda `.github/workflows/ci.yml`; o re
 
 **O piso de plataforma se mede contra o SDK publicado**, nunca contra o `main` do monorepo — que está sempre à frente do que foi cunhado. `shell_min` e `sdk_min` no `manifesto.json` são pisos independentes e cumulativos.
 
+Isso vale para **cada verbo que você chama**, não só para o número do piso. Ler `sdk/src/contrato.ts` no `main` do monorepo e usar o que estiver lá derruba o CI: `req.dados.varrerTudo` existe no `main` e **não** no SDK que esta app compila contra — o PR #48 nasceu vermelho exatamente assim. Se um verbo não está no bundle instalado, ele **não existe para a app**, e a pergunta certa é "quando isso é publicado?", não "deixa eu ver no shell". Quem verifica com stub tem o mesmo dever: o stub espelha o **publicado**, senão aprova o que o CI reprova.
+
 **Teste de app é na instância intermediária** (Pinguim), nunca na de desenvolvimento: ela roda build não homologado, e aviso de obsolescência lido lá é sinal errado.
 
 ## Três restrições do Núcleo que decidem o desenho das telas

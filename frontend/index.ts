@@ -6,6 +6,10 @@ import { falhaDeFlag, type FalhaDeFlag } from './nucleo-cliente.js';
 import { filtrarPorTexto, normalizarTexto } from '../comum/busca.js';
 import { mapaComLimite } from '../comum/concorrencia.js';
 import { badgeStatusParcelamento } from '../comum/status-parcelamento.js';
+import {
+  faseRegularizacao, badgeFase, badgeSituacaoRegistral, situacaoRegistralRelevante,
+  FASES, SITUACOES_REGISTRAIS,
+} from '../comum/regularizacao.js';
 import { soData } from '../comum/cascata.js';
 
 // urbi-shell-page não está no barrel de primitivos — os demais urbi-* são
@@ -72,6 +76,8 @@ interface Rota {
    * shell é montada só do `pathname` — `?setor=2` não chegaria aqui.
    */
   filtroSetor?: number | null;
+  /** Filtro de fase de regularização, também na sub-rota. */
+  filtroFase?: string | null;
 }
 
 function parseRota(sub: string): Rota {
@@ -82,7 +88,13 @@ function parseRota(sub: string): Rota {
   switch (a) {
     case 'parcelamentos': {
       const setor = partes[1] === 'setor' && partes[2] ? Number(partes[2]) : null;
-      return { view: 'parcelamentos', id: null, filtroSetor: Number.isInteger(setor) ? setor : null };
+      const fase = partes[1] === 'fase' && partes[2] ? partes[2] : null;
+      return {
+        view: 'parcelamentos',
+        id: null,
+        filtroSetor: Number.isInteger(setor) ? setor : null,
+        filtroFase: fase,
+      };
     }
     case 'unidades': return { view: 'unidades', id: null };
     case 'setor': return { view: 'setor', id };
@@ -142,6 +154,10 @@ export class AppReg360 extends LitElement {
   /** `lote.id` → ocupantes. Preenchido sob demanda, página a página. */
   @state() private pessoasPorLote = new Map<number, any[]>();
   @state() private carregandoPessoas = false;
+  /** `parcelamento_id` → dados de regularização do app. */
+  @state() private regularizacaoPorParcelamento = new Map<number, any>();
+  @state() private formRegAberto = false;
+  @state() private formReg: Record<string, any> = {};
   /** Parcelamento e incorporação do imóvel aberto, resolvidos para exibir nome. */
   @state() private paiDoImovel: { parcelamento?: any; incorporacao?: any } = {};
   /** Unidades da incorporação do lote aberto, quando há incorporação. */
@@ -209,6 +225,7 @@ export class AppReg360 extends LitElement {
           this.setores = await reg360Api.setores();
           this.parcelamentos = await reg360Api.parcelamentos();
           void this._varrerLotes();
+          void this._carregarRegularizacao();
           break;
         case 'parcelamentos':
           // Setores vêm junto porque o card mostra o NOME do setor, não o id, e
@@ -241,6 +258,7 @@ export class AppReg360 extends LitElement {
             await this._carregarPropostas('parcelamento', this.rota.id);
             void this._carregarMatriculas();
             void this._carregarPessoasDaPagina();
+            void this._carregarRegularizacao();
           }
           break;
         case 'lote':
@@ -357,6 +375,76 @@ export class AppReg360 extends LitElement {
     } catch (e: any) {
       // Contexto ausente degrada rótulo, não a tela.
       this._registrarFalha(e, 'Falha ao carregar o contexto do imóvel');
+    }
+  }
+
+  /**
+   * Dados de regularização de todos os parcelamentos, numa requisição. São 60
+   * registros no máximo — sem isso, os chips de fase e os badges dos cards
+   * fariam 60 chamadas.
+   */
+  private async _carregarRegularizacao() {
+    if (this.regularizacaoPorParcelamento.size > 0) return;
+    try {
+      const { dados } = await reg360Api.listarParcelamentoDados();
+      this.regularizacaoPorParcelamento = new Map(
+        (dados || []).map((d: any) => [Number(d.parcelamento_id), d]),
+      );
+    } catch (e: any) {
+      this._registrarFalha(e, 'Falha ao carregar dados de regularização');
+    }
+  }
+
+  /** Fase do parcelamento. Sem registro, é `irregular` — o estado inicial. */
+  private _faseDe(parcelamentoId: unknown) {
+    return faseRegularizacao(this.regularizacaoPorParcelamento.get(Number(parcelamentoId)));
+  }
+
+  private get podeEditarRegularizacao(): boolean {
+    const ctx = urbiVerso.contexto?.();
+    const roles = ctx?.roles || ctx?.rolesApp || [];
+    return ctx?.nivel === 'admin' || ctx?.nivelApp === 'admin' || roles.includes('editor_regularizacao');
+  }
+
+  private _abrirFormRegularizacao() {
+    const p = this.detalhe;
+    const atual = this.regularizacaoPorParcelamento.get(Number(p?.id)) || {};
+    this.formReg = {
+      numero_decreto: atual.numero_decreto ?? '',
+      matricula_id: atual.matricula_id ?? '',
+      area_poligonal: atual.area_poligonal ?? '',
+      area_viario: atual.area_viario ?? '',
+      area_servidao: atual.area_servidao ?? '',
+      data_envio_projeto: soData(atual.data_envio_projeto) ?? '',
+      data_aprovacao_conplan: soData(atual.data_aprovacao_conplan) ?? '',
+      data_decreto_gdf: soData(atual.data_decreto_gdf) ?? '',
+      situacao_registral: atual.situacao_registral ?? 'nenhuma',
+      observacao: atual.observacao ?? '',
+    };
+    this.formRegAberto = true;
+  }
+
+  private async _salvarRegularizacao() {
+    const p = this.detalhe;
+    if (!p?.id) return;
+    // Campo vazio vira null, não string vazia: "limpar" é uma intenção, e o
+    // backend recusaria '' como data.
+    const corpo: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(this.formReg)) {
+      corpo[k] = v === '' ? null : v;
+    }
+    try {
+      this.carregando = true;
+      const salvo = await reg360Api.salvarParcelamentoDados(Number(p.id), corpo);
+      const mapa = new Map(this.regularizacaoPorParcelamento);
+      mapa.set(Number(p.id), salvo);
+      this.regularizacaoPorParcelamento = mapa;
+      this.formRegAberto = false;
+      urbiVerso.notificar?.('Regularização atualizada', 'sucesso');
+    } catch (e: any) {
+      urbiVerso.notificar?.(e?.message || 'Falha ao salvar regularização', 'erro');
+    } finally {
+      this.carregando = false;
     }
   }
 
@@ -537,6 +625,7 @@ export class AppReg360 extends LitElement {
         ${this._renderView()}
       </urbi-shell-page>
       ${this.formAberto ? this._renderForm() : nothing}
+      ${this.formRegAberto ? this._renderFormRegularizacao() : nothing}
     `;
   }
 
@@ -614,13 +703,16 @@ export class AppReg360 extends LitElement {
   }
 
   private _renderListaParcelamentos(): TemplateResult {
-    const filtrados = filtrarPorTexto(
-      this.rota.filtroSetor
-        ? this.parcelamentos.filter((p) => p.setor_habitacional_id === this.rota.filtroSetor)
-        : this.parcelamentos,
-      this.termoBusca,
-      ['nome', 'slug'],
-    );
+    let base = this.parcelamentos;
+    if (this.rota.filtroSetor) base = base.filter((p) => p.setor_habitacional_id === this.rota.filtroSetor);
+    if (this.rota.filtroFase) base = base.filter((p) => this._faseDe(p.id) === this.rota.filtroFase);
+    const filtrados = filtrarPorTexto(base, this.termoBusca, ['nome', 'slug']);
+
+    // Situação registral só vira faixa de chips onde ela existe nos dados —
+    // chip que nunca filtra nada é ruído.
+    const situacoesPresentes = SITUACOES_REGISTRAIS.filter((op) =>
+      situacaoRegistralRelevante(op.id)
+      && this.parcelamentos.some((p) => this.regularizacaoPorParcelamento.get(Number(p.id))?.situacao_registral === op.id));
 
     return html`
       <urbi-chips-atalho
@@ -632,6 +724,22 @@ export class AppReg360 extends LitElement {
           this._navegar(this.rota.filtroSetor === id ? '/parcelamentos' : `/parcelamentos/setor/${id}`);
         }}
       ></urbi-chips-atalho>
+
+      <urbi-chips-atalho
+        .opcoes=${FASES.map((f) => ({ id: f.id, rotulo: f.rotulo }))}
+        ativo=${this.rota.filtroFase ?? ''}
+        @urbi:chip-atalho:click=${(e: CustomEvent) => {
+          const id = String(e.detail.id);
+          this._navegar(this.rota.filtroFase === id ? '/parcelamentos' : `/parcelamentos/fase/${id}`);
+        }}
+      ></urbi-chips-atalho>
+
+      ${situacoesPresentes.length > 0
+        ? html`<urbi-wrap>${situacoesPresentes.map((op) => html`
+            <urbi-badge cor=${op.cor}>${op.rotulo}: ${this.parcelamentos.filter((p) =>
+              this.regularizacaoPorParcelamento.get(Number(p.id))?.situacao_registral === op.id).length}</urbi-badge>`)}
+          </urbi-wrap>`
+        : nothing}
 
       <urbi-input
         label="Buscar por nome ou sigla"
@@ -650,7 +758,8 @@ export class AppReg360 extends LitElement {
           : html`
             <urbi-grid min="260px" gap="12px">
               ${filtrados.map((p) => {
-                const b = badgeStatusParcelamento(p.status);
+                const b = badgeFase(this._faseDe(p.id));
+                const sit = this.regularizacaoPorParcelamento.get(Number(p.id))?.situacao_registral;
                 const setor = this._nomeSetor(p.setor_habitacional_id);
                 const ag = this.porParcelamento.get(Number(p.id));
                 return html`
@@ -662,7 +771,10 @@ export class AppReg360 extends LitElement {
                     <urbi-stack>
                       <urbi-wrap>
                         ${setor ? html`<urbi-badge cor="padrao">${setor}</urbi-badge>` : nothing}
-                        <urbi-badge cor=${b.cor}>${b.label}</urbi-badge>
+                        <urbi-badge cor=${b.cor}>${b.rotulo}</urbi-badge>
+                        ${situacaoRegistralRelevante(sit)
+                          ? html`<urbi-badge cor=${badgeSituacaoRegistral(sit).cor}>${badgeSituacaoRegistral(sit).rotulo}</urbi-badge>`
+                          : nothing}
                       </urbi-wrap>
                       <div class="prop-meta">${p.slug ?? ''}</div>
                       <div>${this._rotuloLotes(ag?.quantidade ?? 0)}</div>
@@ -729,21 +841,40 @@ export class AppReg360 extends LitElement {
   private _renderDetalheParcelamento(): TemplateResult {
     const p = this.detalhe;
     if (!p) return html`<urbi-loading></urbi-loading>`;
-    const b = badgeStatusParcelamento(p.status);
+    const reg = this.regularizacaoPorParcelamento.get(Number(p.id)) || {};
+    const fase = badgeFase(this._faseDe(p.id));
+    const bNucleo = badgeStatusParcelamento(p.status);
     const setor = this._nomeSetor(p.setor_habitacional_id);
     const areaLotes = this.lotes.reduce((soma, l) => soma + (Number(l.area_efetiva ?? l.area ?? 0) || 0), 0);
+    const mat = this.matriculasPorId.get(Number(reg.matricula_id));
     return html`
       <urbi-botao variante="fantasma" icone="fa-solid fa-arrow-left" pequeno @click=${() => this._navegar('/parcelamentos')}>Voltar</urbi-botao>
       <h2>${nomeDe(p)}</h2>
       <urbi-wrap>
         ${setor ? html`<urbi-badge cor="padrao">${setor}</urbi-badge>` : nothing}
-        <urbi-badge cor=${b.cor}>${b.label}</urbi-badge>
+        <urbi-badge cor=${fase.cor}>${fase.rotulo}</urbi-badge>
+        ${situacaoRegistralRelevante(reg.situacao_registral)
+          ? html`<urbi-badge cor=${badgeSituacaoRegistral(reg.situacao_registral).cor}>${badgeSituacaoRegistral(reg.situacao_registral).rotulo}</urbi-badge>`
+          : nothing}
       </urbi-wrap>
-      <div class="prop-meta">${p.slug ?? ''}</div>
+      <div class="prop-meta">
+        ${p.slug ?? ''} · Nº Decreto: <strong>${reg.numero_decreto || '—'}</strong>
+        · Matrícula-mãe: ${mat ? nomeDe(mat) : (reg.matricula_id ? '…' : '—')}
+        · Registro no Núcleo: ${bNucleo.label}
+      </div>
+      ${this.podeEditarRegularizacao
+        ? html`<div class="barra-acoes">
+            <urbi-botao variante="secundario" pequeno icone="fa-solid fa-pen"
+              @click=${() => this._abrirFormRegularizacao()}>Editar regularização</urbi-botao>
+          </div>`
+        : nothing}
       <urbi-wrap>
         <urbi-kpi rotulo="Lotes" .valor=${this.lotes.length} formato="numero"></urbi-kpi>
         <urbi-kpi rotulo="Área do parcelamento (m²)" .valor=${fmtArea(p.area)} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Área dos lotes (m²)" .valor=${fmtArea(areaLotes)} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Área poligonal (m²)" .valor=${fmtArea(reg.area_poligonal)} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Área de viário (m²)" .valor=${fmtArea(reg.area_viario)} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Área de servidão (m²)" .valor=${fmtArea(reg.area_servidao)} formato="texto"></urbi-kpi>
       </urbi-wrap>
       <urbi-abas
         .abas=${[
@@ -952,6 +1083,43 @@ export class AppReg360 extends LitElement {
               </div>
             `)}
           </urbi-stack>`}
+    `;
+  }
+
+  private _renderFormRegularizacao(): TemplateResult {
+    const f = this.formReg;
+    const campo = (nome: string, label: string, tipo = 'text') => html`
+      <urbi-input label=${label} tipo=${tipo} .valor=${f[nome] ?? ''}
+        @urbi:input-change=${(e: CustomEvent) => { this.formReg = { ...this.formReg, [nome]: e.detail.valor }; }}></urbi-input>`;
+    const faseAtual = badgeFase(faseRegularizacao(this.formReg));
+    return html`
+      <urbi-modal title="Editar regularização" @urbi-modal:close=${() => { this.formRegAberto = false; }}>
+        <p class="prop-meta">
+          A fase é <strong>derivada das datas</strong>, não escolhida: preencher uma data move o
+          parcelamento sozinho. Com esta edição, a fase fica
+          <urbi-badge cor=${faseAtual.cor}>${faseAtual.rotulo}</urbi-badge>.
+        </p>
+        <div class="form-grid">
+          ${campo('numero_decreto', 'Nº do Decreto')}
+          ${campo('matricula_id', 'Matrícula-mãe (id)', 'number')}
+          ${campo('data_envio_projeto', 'Envio do projeto → Em análise', 'date')}
+          ${campo('data_aprovacao_conplan', 'Aprovação CONPLAN → Aprovado', 'date')}
+          ${campo('data_decreto_gdf', 'Decreto GDF → Registrado', 'date')}
+          <urbi-select label="Situação registral"
+            .opcoes=${SITUACOES_REGISTRAIS.map((op) => ({ valor: op.id, rotulo: op.rotulo }))}
+            .valor=${f.situacao_registral ?? 'nenhuma'}
+            @urbi:select-change=${(e: CustomEvent) => { this.formReg = { ...this.formReg, situacao_registral: e.detail.valor }; }}></urbi-select>
+          ${campo('area_poligonal', 'Área poligonal (m²)', 'number')}
+          ${campo('area_viario', 'Área de viário (m²)', 'number')}
+          ${campo('area_servidao', 'Área de servidão (m²)', 'number')}
+          <urbi-input class="full" label="Observação" .valor=${f.observacao ?? ''}
+            @urbi:input-change=${(e: CustomEvent) => { this.formReg = { ...this.formReg, observacao: e.detail.valor }; }}></urbi-input>
+        </div>
+        <div class="barra-acoes" style="margin-top:16px">
+          <urbi-botao variante="fantasma" @click=${() => { this.formRegAberto = false; }}>Cancelar</urbi-botao>
+          <urbi-botao variante="primario" ?carregando=${this.carregando} @click=${() => this._salvarRegularizacao()}>Salvar</urbi-botao>
+        </div>
+      </urbi-modal>
     `;
   }
 

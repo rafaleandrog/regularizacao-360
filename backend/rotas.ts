@@ -3,6 +3,7 @@
 // barrel — sem esta linha, `req.dados` não existe para o tsc.
 import '@urbiverso/sdk/express';
 import { Router } from 'express';
+import { rotasParcelamentoDados } from './parcelamento-dados.js';
 import {
   hoje,
   amanha,
@@ -27,6 +28,10 @@ import {
  * vencimento entram na Fase 3.
  */
 export const rotas: ReturnType<typeof Router> = Router();
+
+// Dados de regularização do Parcelamento — arquivo próprio para este não virar
+// o depósito de tudo conforme as ondas entram.
+rotas.use(rotasParcelamentoDados);
 
 // ---------------------------------------------------------------------------
 // Autorização

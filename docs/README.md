@@ -31,6 +31,7 @@ Toda leitura passa por `frontend/nucleo-cliente.ts`, que pagina em laço, memori
 | `/setor/:id` | Detalhe do Setor — KPIs, abas Empreendimentos e Propostas |
 | `/parcelamentos` | Lista de Parcelamentos (cards), com busca |
 | `/parcelamentos/setor/:id` | A mesma lista, filtrada por Setor |
+| `/parcelamentos/fase/:fase` | A mesma lista, filtrada por fase de regularização |
 | `/parcelamento/:id` | Detalhe do Parcelamento — KPIs, abas Lotes e Propostas |
 | `/lote/:id` | Detalhe do Lote |
 | `/unidade/:id` | Detalhe da Unidade (só onde há incorporação) |
@@ -39,6 +40,10 @@ Toda leitura passa por `frontend/nucleo-cliente.ts`, que pagina em laço, memori
 O filtro de Setor vai **na sub-rota**, não em query string: `subRota()` do shell é montada só do `pathname`, então `?setor=2` não chegaria à app. Como está, a tela filtrada é compartilhável e o botão voltar do navegador funciona.
 
 O termo de busca **não** entra na rota — é transitório por decisão, para não poluir o histórico a cada tecla.
+
+## Regularização do Parcelamento
+
+Duas classificações independentes — a **fase** derivada das datas do trâmite (Irregular → Em análise → Aprovado → Registrado) e a **situação registral** (Caucionado / Prenotado), que é eixo ortogonal. Ver [regularizacao.md](regularizacao).
 
 ## Divisão Núcleo × App
 
