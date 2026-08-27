@@ -2,6 +2,7 @@ import { LitElement, html, css, nothing, type TemplateResult } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { urbiVerso } from './reg360-env.js';
 import { reg360Api, type Proposta } from './reg360-api.js';
+import { falhaDeFlag, type FalhaDeFlag } from './nucleo-cliente.js';
 import { soData } from '../comum/cascata.js';
 
 // urbi-shell-page não está no barrel de primitivos — os demais urbi-* são
@@ -27,6 +28,12 @@ function fmtMoeda(v: unknown): string {
   const n = Number(v);
   if (!Number.isFinite(n)) return '—';
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function fmtArea(v: unknown): string {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function fmtData(v: unknown): string {
@@ -79,18 +86,6 @@ function parseRota(sub: string): Rota {
 export class AppReg360 extends LitElement {
   static styles = css`
     :host { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-    .cards-setor { cursor: pointer; }
-    .card-sh {
-      border: 1px solid var(--cor-borda, rgba(255,255,255,.08));
-      border-radius: 10px;
-      padding: 16px;
-      background: var(--cor-superficie, rgba(255,255,255,.03));
-      cursor: pointer;
-      display: flex; flex-direction: column; gap: 8px;
-    }
-    .card-sh:hover { background: var(--cor-superficie-hover, rgba(255,255,255,.06)); }
-    .card-sh h3 { margin: 0; color: var(--cor-primaria-solida, #2AA9E0); font-size: 1rem; }
-    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 12px 0; }
     .barra-acoes { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
     .prop-card {
       border: 1px solid var(--cor-borda, rgba(255,255,255,.08));
@@ -118,6 +113,12 @@ export class AppReg360 extends LitElement {
   @state() private propostas: Proposta[] = [];
   @state() private vigente: { vigente: Proposta | null; origem_cascata: string | null } | null = null;
   @state() private abaDetalhe = '';
+
+  /** Flag de Núcleo negada — vira banner explicável, nunca lista vazia. */
+  @state() private avisoFlag: FalhaDeFlag | null = null;
+  /** Agregado por parcelamento, derivado da varredura de lotes. */
+  @state() private porParcelamento = new Map<number, { quantidade: number; area: number }>();
+  @state() private varrendoLotes = false;
 
   @state() private formAberto = false;
   @state() private formModo: 'criar' | 'copiar' = 'criar';
@@ -164,31 +165,38 @@ export class AppReg360 extends LitElement {
 
   private async _carregar() {
     this.erro = null;
+    this.avisoFlag = null;
     this.carregando = true;
     try {
       switch (this.rota.view) {
         case 'home':
-          this.setores = (await reg360Api.setores()).dados || [];
+          // Setores e parcelamentos são uma página cada (6 e 60) — a tela
+          // aparece já. A contagem de lotes precisa varrer ~6.200 registros em
+          // 32 requisições, então roda em segundo plano e preenche depois.
+          this.setores = await reg360Api.setores();
+          this.parcelamentos = await reg360Api.parcelamentos();
+          void this._varrerLotes();
           break;
         case 'parcelamentos':
-          this.parcelamentos = (await reg360Api.parcelamentos()).dados || [];
+          this.parcelamentos = await reg360Api.parcelamentos();
           break;
         case 'unidades':
-          this.unidades = (await reg360Api.unidades()).dados || [];
+          this.unidades = await reg360Api.unidades();
           break;
         case 'setor':
           if (this.rota.id) {
             this.abaDetalhe = 'empreendimentos';
             this.detalhe = await reg360Api.setor(this.rota.id);
-            this.parcelamentos = (await reg360Api.parcelamentos({ setor_habitacional_id: this.rota.id })).dados || [];
+            this.parcelamentos = await reg360Api.parcelamentos({ setor_habitacional_id: this.rota.id });
             await this._carregarPropostas('setor', this.rota.id);
+            void this._varrerLotes();
           }
           break;
         case 'parcelamento':
           if (this.rota.id) {
             this.abaDetalhe = 'unidades';
             this.detalhe = await reg360Api.parcelamento(this.rota.id);
-            this.unidades = (await reg360Api.unidades({ parcelamento_id: this.rota.id })).dados || [];
+            this.unidades = await reg360Api.unidades({ parcelamento_id: this.rota.id });
             await this._carregarPropostas('parcelamento', this.rota.id);
           }
           break;
@@ -210,10 +218,62 @@ export class AppReg360 extends LitElement {
           break;
       }
     } catch (e: any) {
-      this.erro = e?.message || 'Falha ao carregar dados';
+      this._registrarFalha(e, 'Falha ao carregar dados');
     } finally {
       this.carregando = false;
     }
+  }
+
+  /**
+   * Flag de Núcleo negada não é erro genérico: é o admin que não ligou o
+   * toggle, ou manifesto que não pediu. Sem essa distinção a tela mostra
+   * "nenhum registro" e ninguém descobre que faltou permissão.
+   */
+  private _registrarFalha(e: unknown, padrao: string) {
+    const flag = falhaDeFlag(e);
+    if (flag) this.avisoFlag = flag;
+    else this.erro = (e as any)?.message || padrao;
+  }
+
+  /**
+   * Varre os lotes uma vez por sessão e agrega por parcelamento. O cliente
+   * memoriza, então voltar para a home não repete as 32 requisições.
+   */
+  private async _varrerLotes() {
+    if (this.varrendoLotes || this.porParcelamento.size > 0) return;
+    this.varrendoLotes = true;
+    try {
+      const lotes = await reg360Api.lotes();
+      const mapa = new Map<number, { quantidade: number; area: number }>();
+      for (const l of lotes) {
+        const pid = Number(l?.parcelamento_id);
+        if (!Number.isInteger(pid)) continue;
+        const atual = mapa.get(pid) || { quantidade: 0, area: 0 };
+        atual.quantidade += 1;
+        atual.area += Number(l?.area_efetiva ?? l?.area ?? 0) || 0;
+        mapa.set(pid, atual);
+      }
+      this.porParcelamento = mapa;
+    } catch (e: any) {
+      // Falha aqui degrada a contagem, não a navegação — a tela continua
+      // utilizável sem os números.
+      this._registrarFalha(e, 'Falha ao contar lotes');
+    } finally {
+      this.varrendoLotes = false;
+    }
+  }
+
+  /** Agregado de um conjunto de parcelamentos (setor, ou a instância toda). */
+  private _agregar(parcelamentos: any[]) {
+    let quantidade = 0;
+    let area = 0;
+    for (const p of parcelamentos) {
+      const a = this.porParcelamento.get(Number(p?.id));
+      if (!a) continue;
+      quantidade += a.quantidade;
+      area += a.area;
+    }
+    return { quantidade, area };
   }
 
   private async _carregarPropostas(nivel: string, refId: number) {
@@ -318,10 +378,29 @@ export class AppReg360 extends LitElement {
           }}
         ></urbi-abas>
 
+        ${this.avisoFlag ? this._renderAvisoFlag(this.avisoFlag) : nothing}
         ${this.erro ? html`<p class="erro">${this.erro}</p>` : nothing}
         ${this._renderView()}
       </urbi-shell-page>
       ${this.formAberto ? this._renderForm() : nothing}
+    `;
+  }
+
+  /**
+   * Os dois 403 do gate de flags têm remédios diferentes, e a tela precisa
+   * dizer qual é qual: toggle que o admin não ligou é operação; flag não
+   * pedida é bug do manifesto. Em nenhum dos casos é "nenhum registro".
+   */
+  private _renderAvisoFlag(f: FalhaDeFlag): TemplateResult {
+    return html`
+      <urbi-banner variante="alerta">
+        ${f.mensagem}
+        ${f.precisaDeAdmin
+          ? html`<br /><small>Peça a quem administra a instância para habilitar o acesso em
+              <strong>Admin → Apps → reg360 → Núcleo</strong>.</small>`
+          : html`<br /><small>O manifesto da app não declara essa permissão — é preciso corrigir o app,
+              não a instância.</small>`}
+      </urbi-banner>
     `;
   }
 
@@ -343,14 +422,34 @@ export class AppReg360 extends LitElement {
     if (this.setores.length === 0) return html`<urbi-estado-vazio icone="fa-solid fa-city" mensagem="Nenhum setor habitacional"></urbi-estado-vazio>`;
     return html`
       <urbi-grid min="240px" gap="12px">
-        ${this.setores.map((sh) => html`
-          <div class="card-sh" @click=${() => this._navegar(`/setor/${sh.id}`)}>
-            <h3>${nomeDe(sh)}</h3>
-            <div class="prop-meta">${sh.slug ?? ''}</div>
-          </div>
-        `)}
+        ${this.setores.map((sh) => {
+          const doSetor = this.parcelamentos.filter((p) => p.setor_habitacional_id === sh.id);
+          const ag = this._agregar(doSetor);
+          return html`
+            <urbi-card
+              clicavel
+              titulo=${nomeDe(sh)}
+              @urbi:card-click=${() => this._navegar(`/setor/${sh.id}`)}
+            >
+              <urbi-stack>
+                <div class="prop-meta">${sh.slug ?? ''}</div>
+                <div>${doSetor.length} ${doSetor.length === 1 ? 'parcelamento' : 'parcelamentos'}</div>
+                <div class="prop-meta">${this._rotuloLotes(ag.quantidade)}</div>
+              </urbi-stack>
+            </urbi-card>
+          `;
+        })}
       </urbi-grid>
     `;
+  }
+
+  /**
+   * A varredura de lotes é assíncrona: enquanto ela não termina, dizer
+   * "0 lotes" seria mentira. Distingue-se "ainda contando" de "nenhum".
+   */
+  private _rotuloLotes(quantidade: number): string {
+    if (this.varrendoLotes && this.porParcelamento.size === 0) return 'contando lotes…';
+    return `${quantidade.toLocaleString('pt-BR')} ${quantidade === 1 ? 'lote' : 'lotes'}`;
   }
 
   private _renderListaParcelamentos(): TemplateResult {
@@ -393,13 +492,16 @@ export class AppReg360 extends LitElement {
   private _renderDetalheSetor(): TemplateResult {
     const sh = this.detalhe;
     if (!sh) return html`<urbi-loading></urbi-loading>`;
+    const ag = this._agregar(this.parcelamentos);
     return html`
       <urbi-botao variante="fantasma" icone="fa-solid fa-arrow-left" pequeno @click=${() => this._navegar('/')}>Voltar</urbi-botao>
       <h2>${nomeDe(sh)}</h2>
-      <div class="kpis">
+      <urbi-wrap>
         <urbi-kpi rotulo="Parcelamentos" .valor=${this.parcelamentos.length} formato="numero"></urbi-kpi>
-        <urbi-kpi rotulo="Propostas vigentes" .valor=${this.propostas.filter((p) => p.status_aprovacao === 'aprovada').length} formato="numero"></urbi-kpi>
-      </div>
+        <urbi-kpi rotulo="Lotes" .valor=${this._rotuloLotes(ag.quantidade)} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Área dos lotes (m²)" .valor=${fmtArea(ag.area)} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Propostas aprovadas" .valor=${this.propostas.filter((p) => p.status_aprovacao === 'aprovada').length} formato="numero"></urbi-kpi>
+      </urbi-wrap>
       <urbi-abas
         .abas=${[
           { id: 'empreendimentos', label: 'Empreendimentos' },
@@ -428,10 +530,10 @@ export class AppReg360 extends LitElement {
     return html`
       <urbi-botao variante="fantasma" icone="fa-solid fa-arrow-left" pequeno @click=${() => this._navegar('/parcelamentos')}>Voltar</urbi-botao>
       <h2>${nomeDe(p)} <urbi-badge cor=${b.cor}>${b.label}</urbi-badge></h2>
-      <div class="kpis">
+      <urbi-wrap>
         <urbi-kpi rotulo="Unidades" .valor=${this.unidades.length} formato="numero"></urbi-kpi>
         <urbi-kpi rotulo="Área poligonal (m²)" .valor=${p.area_poligonal ?? '—'} formato="texto"></urbi-kpi>
-      </div>
+      </urbi-wrap>
       <urbi-abas
         .abas=${[
           { id: 'unidades', label: 'Unidades' },
@@ -459,11 +561,11 @@ export class AppReg360 extends LitElement {
     return html`
       <urbi-botao variante="fantasma" icone="fa-solid fa-arrow-left" pequeno @click=${() => this._navegar('/unidades')}>Voltar</urbi-botao>
       <h2>${nomeDe(u)}</h2>
-      <div class="kpis">
+      <urbi-wrap>
         <urbi-kpi rotulo="Área (m²)" .valor=${u.area_efetiva ?? u.area ?? '—'} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Proposta vigente (R$/m²)"
           .valor=${this.vigente?.vigente ? fmtMoeda(this.vigente.vigente.preco_m2) : '—'} formato="texto"></urbi-kpi>
-      </div>
+      </urbi-wrap>
       ${this.vigente?.vigente
         ? html`<p class="prop-meta">Preço vigente herdado de: <strong>${NIVEL_LABEL[this.vigente.origem_cascata || ''] || '—'}</strong></p>`
         : nothing}
@@ -492,10 +594,10 @@ export class AppReg360 extends LitElement {
         ${NIVEL_LABEL[p.nivel]} · ${p.tipo_proposta} ·
         <urbi-badge cor=${p.status_aprovacao === 'aprovada' ? 'sucesso' : 'alerta'}>${p.status_aprovacao}</urbi-badge>
       </div>
-      <div class="kpis">
+      <urbi-wrap>
         <urbi-kpi rotulo="Preço/m²" .valor=${fmtMoeda(p.preco_m2)} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Vigência" .valor=${`${fmtData(p.data_proposta)} — ${fmtData(p.data_fim_vigencia)}`} formato="texto"></urbi-kpi>
-      </div>
+      </urbi-wrap>
       ${p.descricao ? html`<p>${p.descricao}</p>` : nothing}
       <div class="barra-acoes">
         ${p.status_aprovacao === 'pendente' && this.podeAprovar

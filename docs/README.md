@@ -19,6 +19,10 @@ O app centraliza tudo no UrbiVerso, com:
 - Dashboard de KPIs (áreas, contagens; VGV quando Transação existir no Núcleo)
 - Fluxo de aprovação de propostas com roles (`criador`, `validador_interno`, `editor_regularizacao`)
 
+## Como o app lê o Núcleo
+
+Toda leitura passa por `frontend/nucleo-cliente.ts`, que pagina em laço, memoriza por sessão e distingue flag desligada de lista vazia. O motivo não é gosto: `req.nucleo` **não lê** no backend, e o Núcleo pagina em 200 sem equivalente ao `varrerTudo`. Ver [leitura-nucleo.md](leitura-nucleo).
+
 ## Divisão Núcleo × App
 
 - **Núcleo** — entidades transversais consumidas por leitura: `setores_habitacionais`, `parcelamentos`, `incorporacoes`, `imoveis` (lote/gleba/unidade), `matriculas`, `pessoas` (física/jurídica). Escrita apenas em `pessoas` (vincular moradores).

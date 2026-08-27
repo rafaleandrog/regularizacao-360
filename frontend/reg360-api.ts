@@ -1,9 +1,11 @@
 import { urbiVerso } from './reg360-env.js';
+import * as nucleo from './nucleo-cliente.js';
 
 /**
  * Cliente de API do reg360.
  *  - Rotas da app via `urbiVerso.api('/...')` (slug reg360 injetado).
- *  - Leituras do Núcleo via `urbiVerso.nucleo('/...')` (paths com hífen).
+ *  - Leituras do Núcleo via `nucleo-cliente` (pagina em laço, memoriza por
+ *    sessão e distingue flag desligada de lista vazia).
  */
 
 function qs(params?: Record<string, string | number | undefined | null>): string {
@@ -73,14 +75,17 @@ export const reg360Api = {
     urbiVerso.api(`/propostas/${id}/copiar`, JSON_POST(corpo)),
 
   // ---- Núcleo (leitura) ----
-  setores: (): Promise<ListaDados<any>> => urbiVerso.nucleo('/setores-habitacionais'),
-  setor: (id: number): Promise<any> => urbiVerso.nucleo(`/setores-habitacionais/${id}`),
-  parcelamentos: (p?: Record<string, string | number>): Promise<ListaDados<any>> =>
-    urbiVerso.nucleo(`/parcelamentos${qs(p)}`),
-  parcelamento: (id: number): Promise<any> => urbiVerso.nucleo(`/parcelamentos/${id}`),
-  unidades: (p?: Record<string, string | number>): Promise<ListaDados<any>> =>
-    urbiVerso.nucleo(`/unidades${qs(p)}`),
-  unidade: (id: number): Promise<any> => urbiVerso.nucleo(`/unidades/${id}`),
-  lotes: (p?: Record<string, string | number>): Promise<ListaDados<any>> =>
-    urbiVerso.nucleo(`/lotes${qs(p)}`),
+  // Tudo pelo `nucleo-cliente`: ele pagina em laço, memoriza por sessão e
+  // distingue flag desligada de lista vazia. Chamar `urbiVerso.nucleo` direto
+  // daqui perde as três coisas.
+  setores: (): Promise<any[]> => nucleo.listarTudo('setores-habitacionais'),
+  setor: (id: number): Promise<any> => nucleo.buscar('setores-habitacionais', id),
+  parcelamentos: (p?: Record<string, string | number>): Promise<any[]> =>
+    nucleo.listarTudo('parcelamentos', p),
+  parcelamento: (id: number): Promise<any> => nucleo.buscar('parcelamentos', id),
+  unidades: (p?: Record<string, string | number>): Promise<any[]> =>
+    nucleo.listarTudo('unidades', p),
+  unidade: (id: number): Promise<any> => nucleo.buscar('unidades', id),
+  lotes: (p?: Record<string, string | number>): Promise<any[]> =>
+    nucleo.listarTudo('lotes', p),
 };
