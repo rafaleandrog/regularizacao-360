@@ -160,6 +160,59 @@
         }
       },
       "unicos": [["parcelamento_id"]]
+    },
+    "imovel_dados": {
+      "soft_delete": true,
+      "acesso_externo": "restrito",
+      "colunas": {
+        "imovel_id": {
+          "tipo": "inteiro",
+          "obrigatorio": true
+        },
+        "imovel_tipo": {
+          "tipo": "texto",
+          "limite": 10,
+          "obrigatorio": true,
+          "opcoes": ["lote", "unidade"]
+        },
+        "preco_estatico": {
+          "tipo": "decimal",
+          "precisao": 12,
+          "escala": 2
+        },
+        "preco_estatico_em": {
+          "tipo": "data"
+        },
+        "preco_estatico_por_id": {
+          "tipo": "referencia",
+          "tabela_ref": "shell.usuarios",
+          "campos_incluir": ["nome as preco_estatico_por_nome"],
+          "ao_deletar": "anular"
+        },
+        "preco_m2_manual": {
+          "tipo": "decimal",
+          "precisao": 12,
+          "escala": 2
+        },
+        "quitado": {
+          "tipo": "booleano",
+          "padrao": false
+        },
+        "quitado_em": {
+          "tipo": "data"
+        },
+        "quitado_por_id": {
+          "tipo": "referencia",
+          "tabela_ref": "shell.usuarios",
+          "campos_incluir": ["nome as quitado_por_nome"],
+          "ao_deletar": "anular"
+        },
+        "observacao": {
+          "tipo": "texto_longo"
+        }
+      },
+      "unicos": [["imovel_id", "imovel_tipo"]],
+      "indices": [["imovel_tipo", "quitado"]]
     }
   }
 }

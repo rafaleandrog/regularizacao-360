@@ -71,6 +71,16 @@ export const reg360Api = {
   criarProposta: (corpo: Partial<Proposta>): Promise<Proposta> =>
     urbiVerso.api('/propostas', JSON_POST(corpo)),
 
+  // ---- Dados do imóvel: preços (tabela do app) ----
+  imovelDados: (tipo: string, id: number): Promise<any> =>
+    urbiVerso.api(`/imovel-dados/${tipo}/${id}`),
+  gravarPrecoEstatico: (tipo: string, id: number, preco: number): Promise<any> =>
+    urbiVerso.api(`/imovel-dados/${tipo}/${id}/preco-estatico`, JSON_POST({ preco_estatico: preco })),
+  corrigirPrecoEstatico: (tipo: string, id: number, preco: number | null): Promise<any> =>
+    urbiVerso.api(`/imovel-dados/${tipo}/${id}/preco-estatico/corrigir`, JSON_POST({ preco_estatico: preco })),
+  salvarPrecoManual: (tipo: string, id: number, preco: number | null): Promise<any> =>
+    urbiVerso.api(`/imovel-dados/${tipo}/${id}/preco-manual`, JSON_POST({ preco_m2_manual: preco }, 'PUT')),
+
   // ---- Dados de regularização do Parcelamento (tabela do app) ----
   listarParcelamentoDados: (): Promise<ListaDados<any>> => urbiVerso.api('/parcelamento-dados'),
   salvarParcelamentoDados: (parcelamentoId: number, corpo: Record<string, unknown>): Promise<any> =>
