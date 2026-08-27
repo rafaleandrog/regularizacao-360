@@ -141,3 +141,23 @@ export function listarTudo<T = any>(
 export function buscar<T = any>(recurso: string, id: number): Promise<T> {
   return memorizar(`${recurso}/${id}`, () => urbiVerso.nucleo(`/${recurso}/${id}`));
 }
+
+/**
+ * Sub-recurso de um registro — hoje só `\/lotes\/:id\/pessoas`.
+ *
+ * É por id, um de cada vez, porque o Núcleo **não expõe** `imovel_pessoas` em
+ * lote: não há expansão de vínculo na listagem de lotes, nem na de imóveis, nem
+ * filtro por lista de ids. Mostrar quem ocupa cada lote numa tabela custa uma
+ * requisição por linha — daí o cache aqui e o limite de concorrência em
+ * `comum/concorrencia.ts` de quem chama.
+ */
+export function listarSubRecurso<T = any>(
+  recurso: string,
+  id: number,
+  sub: string,
+): Promise<T[]> {
+  return memorizar(`${recurso}/${id}/${sub}`, async () => {
+    const resposta: PaginaNucleo<T> = await urbiVerso.nucleo(`/${recurso}/${id}/${sub}`);
+    return resposta?.dados || [];
+  });
+}
