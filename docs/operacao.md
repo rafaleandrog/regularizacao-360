@@ -31,6 +31,7 @@ npm run registrar     # regenera apps.json (o shell descobre a app)
    | `setores_habitacionais` | `ler` | home e detalhe do Setor; busca de setor pelo importador |
    | `parcelamentos` | `ler`, `escrever` | navegação lê; o importador cria parcelamento por slug |
    | `imoveis` | `ler`, `escrever` | listagem de lotes e unidades lê; o importador cria lote. **Lote e unidade são subtipos** — a flag se pede no supertipo `imoveis`, nunca em `lotes`/`unidades` |
+   | `incorporacoes` | `ler` | detalhe do Lote resolve o nome da incorporação e lista as unidades dela |
    | `matriculas` | `ler`, `escrever` | o importador cria matrícula por número |
    | `pessoas` | `ler`, `escrever` | o importador cria pessoa física por CPF |
 

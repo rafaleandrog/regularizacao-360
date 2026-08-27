@@ -142,6 +142,10 @@ export class AppReg360 extends LitElement {
   /** `lote.id` → ocupantes. Preenchido sob demanda, página a página. */
   @state() private pessoasPorLote = new Map<number, any[]>();
   @state() private carregandoPessoas = false;
+  /** Parcelamento e incorporação do imóvel aberto, resolvidos para exibir nome. */
+  @state() private paiDoImovel: { parcelamento?: any; incorporacao?: any } = {};
+  /** Unidades da incorporação do lote aberto, quando há incorporação. */
+  @state() private unidadesDoLote: any[] = [];
 
   /** Flag de Núcleo negada — vira banner explicável, nunca lista vazia. */
   @state() private avisoFlag: FalhaDeFlag | null = null;
@@ -250,6 +254,7 @@ export class AppReg360 extends LitElement {
             await this._carregarPropostas(this.rota.view, this.rota.id);
             if (ehLote) this.pessoasPorLote = new Map([[this.rota.id, await reg360Api.pessoasDoLote(this.rota.id)]]);
             void this._carregarMatriculas();
+            void this._carregarContextoDoImovel();
             this.vigente = await reg360Api.resolverVigente({
               nivel: this.rota.view,
               ref_id: this.rota.id,
@@ -322,6 +327,36 @@ export class AppReg360 extends LitElement {
     } catch (e: any) {
       // Degrada a coluna Matrícula, não a tela.
       this._registrarFalha(e, 'Falha ao carregar matrículas');
+    }
+  }
+
+  /**
+   * Resolve os "pais" do imóvel para a tela mostrar NOME, não id: o
+   * Parcelamento do lote e, quando existe, a Incorporação. Com incorporação,
+   * carrega também as unidades dela — que é onde `unidades` de fato vive no
+   * Núcleo (`incorporacao_id` é NOT NULL, e é o único filtro válido).
+   */
+  private async _carregarContextoDoImovel() {
+    const d = this.detalhe;
+    if (!d) return;
+    this.paiDoImovel = {};
+    this.unidadesDoLote = [];
+    try {
+      if (d.parcelamento_id) {
+        this.paiDoImovel = { ...this.paiDoImovel, parcelamento: await reg360Api.parcelamento(Number(d.parcelamento_id)) };
+      }
+      if (d.incorporacao_id) {
+        const [inc, unidades] = await Promise.all([
+          reg360Api.incorporacao(Number(d.incorporacao_id)),
+          reg360Api.unidades({ incorporacao_id: Number(d.incorporacao_id) }),
+        ]);
+        this.paiDoImovel = { ...this.paiDoImovel, incorporacao: inc };
+        // A própria unidade aberta não entra na lista de irmãs.
+        this.unidadesDoLote = unidades.filter((u: any) => Number(u.id) !== Number(d.id));
+      }
+    } catch (e: any) {
+      // Contexto ausente degrada rótulo, não a tela.
+      this._registrarFalha(e, 'Falha ao carregar o contexto do imóvel');
     }
   }
 
@@ -800,16 +835,38 @@ export class AppReg360 extends LitElement {
     return html`
       <urbi-botao variante="fantasma" icone="fa-solid fa-arrow-left" pequeno @click=${() => this._navegar(voltar)}>Voltar</urbi-botao>
       <h2>${nomeDe(u)}</h2>
+      <urbi-wrap>
+        ${this.paiDoImovel.parcelamento
+          ? html`<urbi-badge cor="padrao">${nomeDe(this.paiDoImovel.parcelamento)}</urbi-badge>`
+          : nothing}
+        ${this.paiDoImovel.incorporacao
+          ? html`<urbi-badge cor="info">${nomeDe(this.paiDoImovel.incorporacao)}</urbi-badge>`
+          : nothing}
+      </urbi-wrap>
       ${ocupantes.length > 0
         ? html`<urbi-wrap>${ocupantes.map((v: any) =>
-            html`<urbi-badge cor="padrao">${v.nome ?? v.razao_social ?? `#${v.pessoa_id}`}</urbi-badge>`)}</urbi-wrap>`
-        : nothing}
+            html`<urbi-badge cor="padrao">${v.nome ?? v.razao_social ?? `#${v.pessoa_id}`}${v.legado ? ' (legado)' : ''}</urbi-badge>`)}</urbi-wrap>`
+        : html`<p class="prop-meta">Nenhum morador vinculado.</p>`}
       <urbi-wrap>
         <urbi-kpi rotulo="Área (m²)" .valor=${fmtArea(u.area_efetiva ?? u.area)} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Matrícula" .valor=${mat ? nomeDe(mat) : '—'} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Proposta vigente (R$/m²)"
           .valor=${this.vigente?.vigente ? fmtMoeda(this.vigente.vigente.preco_m2) : '—'} formato="texto"></urbi-kpi>
       </urbi-wrap>
+      ${this.unidadesDoLote.length > 0
+        ? html`
+            <p class="secao-titulo">Unidades desta incorporação</p>
+            <urbi-tabela
+              clicavel
+              .colunas=${[
+                { id: 'ident', label: 'Unidade', valor: (l: any) => nomeDe(l) },
+                { id: 'tipologia', label: 'Tipologia', valor: (l: any) => String(l.tipologia ?? '—') },
+                { id: 'area', label: 'Área (m²)', alinhamento: 'direita', valor: (l: any) => fmtArea(l.area_efetiva ?? l.area) },
+              ]}
+              .linhas=${this.unidadesDoLote}
+              @urbi:tabela-click=${(e: CustomEvent) => this._navegar(`/unidade/${e.detail.linha.id}`)}
+            ></urbi-tabela>`
+        : nothing}
       ${u.area == null && u.area_matricula != null
         ? html`<p class="prop-meta">Área herdada da matrícula — o lote não tem área própria registrada.</p>`
         : nothing}
@@ -820,14 +877,18 @@ export class AppReg360 extends LitElement {
         .abas=${[
           { id: 'propostas', label: 'Propostas Vigentes' },
           { id: 'transacoes', label: 'Transações', dot: 'aviso' },
+          { id: 'acoes', label: 'Ações', dot: 'aviso' },
         ]}
         ativa=${this.abaDetalhe}
         @urbi:aba-selecionar=${(e: CustomEvent) => { this.abaDetalhe = e.detail.id; }}
       ></urbi-abas>
       ${this.abaDetalhe === 'transacoes'
         ? html`<urbi-estado-vazio icone="fa-solid fa-clock" mensagem="Transações em breve"
-            submensagem="Disponível quando a entidade Transação existir no Núcleo."></urbi-estado-vazio>`
-        : this._renderPropostasVigentes(this.rota.view, u.id)}
+            submensagem="A entidade Transação ainda não existe no Núcleo. Ver issue #36."></urbi-estado-vazio>`
+        : this.abaDetalhe === 'acoes'
+          ? html`<urbi-estado-vazio icone="fa-solid fa-gavel" mensagem="Ações em breve"
+              submensagem="Ações judiciais entram na Onda 4. Ver issues #30 a #32."></urbi-estado-vazio>`
+          : this._renderPropostasVigentes(this.rota.view, u.id)}
     `;
   }
 

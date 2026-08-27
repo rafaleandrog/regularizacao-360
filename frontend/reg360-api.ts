@@ -93,6 +93,8 @@ export const reg360Api = {
     nucleo.listarTudo('lotes', p),
   lote: (id: number): Promise<any> => nucleo.buscar('lotes', id),
   matriculas: (): Promise<any[]> => nucleo.listarTudo('matriculas'),
+  /** Incorporação de um lote, quando há. Exige a flag `ler` em `incorporacoes`. */
+  incorporacao: (id: number): Promise<any> => nucleo.buscar('incorporacoes', id),
   /** Ocupantes do lote (`imovel_pessoas`). Uma requisição por lote — ver o cliente. */
   pessoasDoLote: (id: number): Promise<any[]> => nucleo.listarSubRecurso('lotes', id, 'pessoas'),
 };
