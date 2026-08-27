@@ -25,7 +25,16 @@ export const CAMPOS_EDITAVEIS = [
   'lote_grande_m2',
 ] as const;
 
-export type NivelProposta = 'setor' | 'parcelamento' | 'unidade';
+/**
+ * Os quatro níveis, do mais geral ao mais específico.
+ *
+ * `lote` entrou porque o objeto de negociação é o Lote (ver a issue #7): no
+ * Núcleo, `unidades.incorporacao_id` é NOT NULL, então unidade só existe sob
+ * incorporação — e a maioria dos lotes não tem uma. `unidade` continua sendo o
+ * nível MAIS específico, porque a unidade está DENTRO do lote: a incorporação
+ * se ergue sobre ele.
+ */
+export type NivelProposta = 'setor' | 'parcelamento' | 'lote' | 'unidade';
 
 /** Data de hoje em `YYYY-MM-DD` (fuso local do processo). */
 export function hoje(): string {
@@ -76,6 +85,24 @@ export function dentroDaJanelaVencimento(p: any, hoje: string, limite: string): 
   return fim >= hoje && fim <= limite;
 }
 
+/**
+ * Estado de vigência de uma proposta, para a tela.
+ *
+ * Existe porque o badge de APROVAÇÃO sozinho engana: uma proposta "aprovada"
+ * cuja `data_fim_vigencia` já passou aparece verde e não vale mais nada. São
+ * dois eixos — aprovação e vigência — e a tela precisa mostrar os dois.
+ */
+export type StatusVigencia = 'pendente' | 'futura' | 'vigente' | 'vencida';
+
+export function statusVigencia(p: any, ref: string): StatusVigencia {
+  if (!estaAprovada(p)) return 'pendente';
+  const inicio = soData(p?.data_proposta);
+  const fim = soData(p?.data_fim_vigencia);
+  if (inicio && inicio > ref) return 'futura';
+  if (fim && fim < ref) return 'vencida';
+  return 'vigente';
+}
+
 /** Uma proposta está aprovada? */
 export function estaAprovada(p: any): boolean {
   return p?.status_aprovacao === 'aprovada';
@@ -94,26 +121,49 @@ export function selecionarVigente(propostas: any[], ref: string): any | null {
 }
 
 /**
- * Monta a cadeia de candidatos da cascata, do mais específico ao mais geral.
- * O chamador (frontend) fornece os IDs dos pais quando conhecidos — o backend
- * não resolve a hierarquia do Núcleo (req.nucleo não expõe leitura por id).
- * Níveis sem ID conhecido são pulados.
+ * Cadeia de candidatos da cascata, do mais específico ao mais geral:
+ * `Unidade → Lote → Parcelamento → Setor`.
+ *
+ * O chamador (frontend) fornece os ids dos pais quando os conhece — o backend
+ * NÃO resolve a hierarquia do Núcleo, porque `req.nucleo` não lê. Elo sem id
+ * conhecido é pulado, não invalida a cadeia: uma unidade cujo lote-pai não veio
+ * ainda herda do parcelamento.
  */
 export function montarCadeia(
   nivel: string,
   refId: number,
-  pais: { parcelamento_id?: number | null; setor_id?: number | null } = {},
+  pais: {
+    lote_id?: number | null;
+    parcelamento_id?: number | null;
+    setor_id?: number | null;
+  } = {},
 ): Array<{ nivel: NivelProposta; ref_id: number }> {
   const cadeia: Array<{ nivel: NivelProposta; ref_id: number }> = [];
-  if (nivel === 'unidade') {
-    cadeia.push({ nivel: 'unidade', ref_id: refId });
-    if (pais.parcelamento_id) cadeia.push({ nivel: 'parcelamento', ref_id: pais.parcelamento_id });
-    if (pais.setor_id) cadeia.push({ nivel: 'setor', ref_id: pais.setor_id });
-  } else if (nivel === 'parcelamento') {
-    cadeia.push({ nivel: 'parcelamento', ref_id: refId });
-    if (pais.setor_id) cadeia.push({ nivel: 'setor', ref_id: pais.setor_id });
-  } else if (nivel === 'setor') {
-    cadeia.push({ nivel: 'setor', ref_id: refId });
+  const empilhar = (n: NivelProposta, id: number | null | undefined) => {
+    if (id) cadeia.push({ nivel: n, ref_id: id });
+  };
+
+  // Do mais específico ao mais geral. O elo de partida é o próprio nível
+  // pedido; os de cima entram quando o chamador conhece o id do pai.
+  switch (nivel) {
+    case 'unidade':
+      empilhar('unidade', refId);
+      empilhar('lote', pais.lote_id);
+      empilhar('parcelamento', pais.parcelamento_id);
+      empilhar('setor', pais.setor_id);
+      break;
+    case 'lote':
+      empilhar('lote', refId);
+      empilhar('parcelamento', pais.parcelamento_id);
+      empilhar('setor', pais.setor_id);
+      break;
+    case 'parcelamento':
+      empilhar('parcelamento', refId);
+      empilhar('setor', pais.setor_id);
+      break;
+    case 'setor':
+      empilhar('setor', refId);
+      break;
   }
   return cadeia;
 }

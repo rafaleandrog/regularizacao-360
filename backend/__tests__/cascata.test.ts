@@ -10,6 +10,7 @@ import {
   apenasEditaveis,
   amanha,
   dentroDaJanelaVencimento,
+  statusVigencia,
 } from '../../comum/cascata.js';
 
 // Helper: replica o laço da rota GET /propostas/vigente sobre a cadeia,
@@ -178,5 +179,125 @@ describe('cascata (RN-01) — resolução ponta a ponta', () => {
     const r = resolverCascata(cadeia, { unidade: [], parcelamento: [parcVencida], setor: [propostaSetor] }, ref);
     assert.equal(r.origem, 'setor');
     assert.equal(r.vigente.id, 500);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Quarto nível: Lote (issue #23/#24)
+// ---------------------------------------------------------------------------
+
+/** Proposta aprovada e vigente em 2026, para os casos de cascata abaixo. */
+function aprovada(campos: Record<string, unknown>) {
+  return {
+    status_aprovacao: 'aprovada',
+    data_proposta: '2026-01-01',
+    data_fim_vigencia: '2026-12-31',
+    ...campos,
+  };
+}
+
+describe('cascata de 4 níveis — Unidade → Lote → Parcelamento → Setor', () => {
+  const CADEIA_COMPLETA = { lote_id: 10, parcelamento_id: 20, setor_id: 30 };
+
+  test('unidade monta os quatro elos, do mais específico ao mais geral', () => {
+    assert.deepEqual(montarCadeia('unidade', 1, CADEIA_COMPLETA), [
+      { nivel: 'unidade', ref_id: 1 },
+      { nivel: 'lote', ref_id: 10 },
+      { nivel: 'parcelamento', ref_id: 20 },
+      { nivel: 'setor', ref_id: 30 },
+    ]);
+  });
+
+  test('lote monta três elos — é a folha no caso comum, sem incorporação', () => {
+    assert.deepEqual(montarCadeia('lote', 10, CADEIA_COMPLETA), [
+      { nivel: 'lote', ref_id: 10 },
+      { nivel: 'parcelamento', ref_id: 20 },
+      { nivel: 'setor', ref_id: 30 },
+    ]);
+  });
+
+  test('elo sem id conhecido é pulado, não invalida a cadeia', () => {
+    // Unidade cuja lote-pai não veio ainda herda do parcelamento.
+    assert.deepEqual(montarCadeia('unidade', 1, { parcelamento_id: 20, setor_id: 30 }), [
+      { nivel: 'unidade', ref_id: 1 },
+      { nivel: 'parcelamento', ref_id: 20 },
+      { nivel: 'setor', ref_id: 30 },
+    ]);
+  });
+
+  test('sem pai nenhum, a cadeia é só o próprio nível', () => {
+    assert.deepEqual(montarCadeia('lote', 10, {}), [{ nivel: 'lote', ref_id: 10 }]);
+  });
+
+  test('proposta do lote sobrepõe a do parcelamento e a do setor', () => {
+    const propostas = {
+      lote: [aprovada({ ref_id: 10, preco_m2: 300, data_proposta: '2026-01-01', data_fim_vigencia: '2026-12-31' })],
+      parcelamento: [aprovada({ ref_id: 20, preco_m2: 200, data_proposta: '2026-01-01', data_fim_vigencia: '2026-12-31' })],
+      setor: [aprovada({ ref_id: 30, preco_m2: 100, data_proposta: '2026-01-01', data_fim_vigencia: '2026-12-31' })],
+    };
+    const r = resolverCascata(montarCadeia('lote', 10, CADEIA_COMPLETA), propostas, '2026-06-01');
+    assert.equal(r?.vigente?.preco_m2, 300);
+    assert.equal(r?.origem, 'lote');
+  });
+
+  test('proposta da unidade sobrepõe a do lote', () => {
+    const propostas = {
+      unidade: [aprovada({ ref_id: 1, preco_m2: 500, data_proposta: '2026-01-01', data_fim_vigencia: '2026-12-31' })],
+      lote: [aprovada({ ref_id: 10, preco_m2: 300, data_proposta: '2026-01-01', data_fim_vigencia: '2026-12-31' })],
+    };
+    const r = resolverCascata(montarCadeia('unidade', 1, CADEIA_COMPLETA), propostas, '2026-06-01');
+    assert.equal(r?.vigente?.preco_m2, 500);
+    assert.equal(r?.origem, 'unidade');
+  });
+
+  test('proposta do lote VENCIDA some da cascata e o parcelamento assume', () => {
+    const propostas = {
+      lote: [aprovada({ ref_id: 10, preco_m2: 300, data_proposta: '2025-01-01', data_fim_vigencia: '2025-12-31' })],
+      parcelamento: [aprovada({ ref_id: 20, preco_m2: 200, data_proposta: '2026-01-01', data_fim_vigencia: '2026-12-31' })],
+    };
+    const r = resolverCascata(montarCadeia('lote', 10, CADEIA_COMPLETA), propostas, '2026-06-01');
+    assert.equal(r?.vigente?.preco_m2, 200);
+    assert.equal(r?.origem, 'parcelamento');
+  });
+
+  test('proposta PENDENTE no lote não entra na cascata — sobe para o parcelamento', () => {
+    const propostas = {
+      lote: [{ status_aprovacao: 'pendente', ref_id: 10, preco_m2: 300, data_proposta: '2026-01-01', data_fim_vigencia: '2026-12-31' }],
+      parcelamento: [aprovada({ ref_id: 20, preco_m2: 200, data_proposta: '2026-01-01', data_fim_vigencia: '2026-12-31' })],
+    };
+    const r = resolverCascata(montarCadeia('lote', 10, CADEIA_COMPLETA), propostas, '2026-06-01');
+    assert.equal(r?.vigente?.preco_m2, 200);
+    assert.equal(r?.origem, 'parcelamento');
+  });
+});
+
+describe('statusVigencia — aprovação e vigência são eixos diferentes', () => {
+  const HOJE = '2026-06-15';
+
+  test('pendente ignora as datas — não foi aprovada', () => {
+    assert.equal(statusVigencia(
+      { status_aprovacao: 'pendente', data_proposta: '2026-01-01', data_fim_vigencia: '2026-12-31' }, HOJE), 'pendente');
+  });
+
+  test('aprovada dentro do período é vigente', () => {
+    assert.equal(statusVigencia(aprovada({}), HOJE), 'vigente');
+  });
+
+  test('APROVADA E VENCIDA não é "vigente" — é o caso que o badge de aprovação escondia', () => {
+    assert.equal(statusVigencia(
+      aprovada({ data_proposta: '2025-01-01', data_fim_vigencia: '2025-12-31' }), HOJE), 'vencida');
+  });
+
+  test('aprovada com início no futuro é futura, não vigente', () => {
+    assert.equal(statusVigencia(
+      aprovada({ data_proposta: '2026-09-01', data_fim_vigencia: '2026-12-31' }), HOJE), 'futura');
+  });
+
+  test('bordas do período contam como vigente', () => {
+    assert.equal(statusVigencia(aprovada({ data_proposta: HOJE, data_fim_vigencia: HOJE }), HOJE), 'vigente');
+  });
+
+  test('sem datas, aprovada é vigente — não há o que vencer', () => {
+    assert.equal(statusVigencia({ status_aprovacao: 'aprovada' }, HOJE), 'vigente');
   });
 });

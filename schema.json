@@ -16,7 +16,7 @@
           "tipo": "texto",
           "limite": 20,
           "obrigatorio": true,
-          "opcoes": ["setor", "parcelamento", "unidade"]
+          "opcoes": ["setor", "parcelamento", "lote", "unidade"]
         },
         "tipo_proposta": {
           "tipo": "texto",
