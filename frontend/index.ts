@@ -10,7 +10,7 @@ import {
   faseRegularizacao, badgeFase, badgeSituacaoRegistral, situacaoRegistralRelevante,
   FASES, SITUACOES_REGISTRAIS,
 } from '../comum/regularizacao.js';
-import { soData } from '../comum/cascata.js';
+import { soData, hoje, statusVigencia, type StatusVigencia } from '../comum/cascata.js';
 
 // urbi-shell-page não está no barrel de primitivos — os demais urbi-* são
 // registrados globalmente pelo shell (ui/src/primitivos.ts).
@@ -37,6 +37,14 @@ const LOTES_POR_PAGINA = 25;
 
 /** Requisições simultâneas ao buscar ocupantes. Janela, não enxurrada. */
 const LIMITE_SIMULTANEO = 6;
+
+/** Vigência é eixo separado da aprovação — ver `statusVigencia`. */
+const BADGE_VIGENCIA: Record<StatusVigencia, { cor: string; rotulo: string }> = {
+  pendente: { cor: 'alerta', rotulo: 'Pendente' },
+  futura: { cor: 'info', rotulo: 'Futura' },
+  vigente: { cor: 'sucesso', rotulo: 'Vigente' },
+  vencida: { cor: 'padrao', rotulo: 'Vencida' },
+};
 
 const TIPO_OPCOES = [
   { valor: 'tabela', rotulo: 'Tabela' },
@@ -272,11 +280,16 @@ export class AppReg360 extends LitElement {
             await this._carregarPropostas(this.rota.view, this.rota.id);
             if (ehLote) this.pessoasPorLote = new Map([[this.rota.id, await reg360Api.pessoasDoLote(this.rota.id)]]);
             void this._carregarMatriculas();
-            void this._carregarContextoDoImovel();
+            // O contexto vem ANTES da cascata: sem o parcelamento resolvido não
+            // se sabe o setor, e o elo de Setor da cadeia seria pulado — a
+            // unidade não herdaria o preço-base que sempre existe lá.
+            await this._carregarContextoDoImovel();
             this.vigente = await reg360Api.resolverVigente({
               nivel: this.rota.view,
               ref_id: this.rota.id,
-              parcelamento_id: this.detalhe?.parcelamento_id,
+              lote_id: ehLote ? undefined : this.detalhe?.lote_id,
+              parcelamento_id: this.detalhe?.parcelamento_id ?? this.paiDoImovel.parcelamento?.id,
+              setor_id: this.paiDoImovel.parcelamento?.setor_habitacional_id,
             });
           }
           break;
@@ -1048,19 +1061,23 @@ export class AppReg360 extends LitElement {
   }
 
   private _renderPropostasVigentes(nivel: string, refId: number): TemplateResult {
-    // `schema.json` ainda aceita só setor|parcelamento|unidade em `nivel`.
-    // Oferecer "Criar Proposta" num Lote produziria um 422 — botão que só
-    // falha é pior que botão ausente. A issue #23 abre o quarto nível e a #24
-    // completa a cascata; até lá, o Lote lista o que existe e herda o preço.
-    const podeCriarNesteNivel = this.podeCriar && nivel !== 'lote';
+    const ref = hoje();
+    const herdada = this.vigente?.vigente && this.vigente.origem_cascata !== nivel
+      ? this.vigente
+      : null;
     return html`
-      ${podeCriarNesteNivel
+      ${this.podeCriar
         ? html`<div class="barra-acoes">
             <urbi-botao variante="primario" icone="fa-solid fa-plus" @click=${() => this._abrirCriar(nivel, refId)}>Criar Proposta</urbi-botao>
           </div>`
-        : nivel === 'lote' && this.podeCriar
-          ? html`<p class="prop-meta">Proposta por Lote chega com a issue #23 — por ora, crie no Parcelamento ou no Setor.</p>`
-          : nothing}
+        : nothing}
+      ${herdada
+        ? html`<urbi-banner variante="info">
+            Sem proposta própria vigente aqui. O preço em uso vem de
+            <strong>${NIVEL_LABEL[herdada.origem_cascata || ''] || '—'}</strong>:
+            ${fmtMoeda(herdada.vigente!.preco_m2)}/m².
+          </urbi-banner>`
+        : nothing}
       ${this.propostas.length === 0
         ? html`<urbi-estado-vazio icone="fa-solid fa-file-invoice-dollar" mensagem="Nenhuma proposta neste nível"></urbi-estado-vazio>`
         : html`<urbi-stack>
@@ -1068,7 +1085,11 @@ export class AppReg360 extends LitElement {
               <div class="prop-card">
                 <div class="prop-topo">
                   <span class="prop-titulo">${p.titulo}</span>
-                  <urbi-badge cor=${p.status_aprovacao === 'aprovada' ? 'sucesso' : 'alerta'}>${p.status_aprovacao}</urbi-badge>
+                  <urbi-wrap>
+                    <urbi-badge cor=${p.status_aprovacao === 'aprovada' ? 'sucesso' : 'alerta'}>${p.status_aprovacao}</urbi-badge>
+                    ${(() => { const v = BADGE_VIGENCIA[statusVigencia(p, ref)];
+                      return html`<urbi-badge cor=${v.cor}>${v.rotulo}</urbi-badge>`; })()}
+                  </urbi-wrap>
                 </div>
                 <div class="prop-meta">
                   ${p.tipo_proposta} · ${fmtMoeda(p.preco_m2)}/m² · ${fmtData(p.data_proposta)} a ${fmtData(p.data_fim_vigencia)}
@@ -1077,7 +1098,7 @@ export class AppReg360 extends LitElement {
                   <urbi-botao variante="fantasma" pequeno @click=${() => this._navegar(`/proposta/${p.id}`)}>Detalhes</urbi-botao>
                   ${p.status_aprovacao === 'pendente' && this.podeAprovar
                     ? html`<urbi-botao variante="sucesso" pequeno @click=${() => this._aprovar(p)}>Aprovar</urbi-botao>` : nothing}
-                  ${podeCriarNesteNivel
+                  ${this.podeCriar
                     ? html`<urbi-botao variante="secundario" pequeno @click=${() => this._abrirCopiar(p)}>Copiar</urbi-botao>` : nothing}
                 </div>
               </div>

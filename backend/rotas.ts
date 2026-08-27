@@ -145,10 +145,11 @@ rotas.get('/propostas/vigente', async (req, res) => {
   try {
     const nivel = String(req.query.nivel || '');
     const refId = Number(req.query.ref_id);
-    if (!['setor', 'parcelamento', 'unidade'].includes(nivel) || !Number.isInteger(refId)) {
-      return erro(res, 400, 'REG360_PARAMS_INVALIDOS', 'Informe nivel (setor|parcelamento|unidade) e ref_id');
+    if (!['setor', 'parcelamento', 'lote', 'unidade'].includes(nivel) || !Number.isInteger(refId)) {
+      return erro(res, 400, 'REG360_PARAMS_INVALIDOS', 'Informe nivel (setor|parcelamento|lote|unidade) e ref_id');
     }
     const pais = {
+      lote_id: req.query.lote_id ? Number(req.query.lote_id) : null,
       parcelamento_id: req.query.parcelamento_id ? Number(req.query.parcelamento_id) : null,
       setor_id: req.query.setor_id ? Number(req.query.setor_id) : null,
     };

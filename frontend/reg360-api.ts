@@ -28,7 +28,7 @@ export interface Proposta {
   id: number;
   titulo: string;
   descricao?: string;
-  nivel: 'setor' | 'parcelamento' | 'unidade';
+  nivel: 'setor' | 'parcelamento' | 'lote' | 'unidade';
   tipo_proposta: 'tabela' | 'campanha' | 'negociacao_coletiva';
   ref_id: number;
   data_proposta: string;
@@ -63,6 +63,7 @@ export const reg360Api = {
   resolverVigente: (p: {
     nivel: string;
     ref_id: number;
+    lote_id?: number;
     parcelamento_id?: number;
     setor_id?: number;
   }): Promise<{ vigente: Proposta | null; origem_cascata: string | null }> =>
