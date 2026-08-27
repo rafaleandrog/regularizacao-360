@@ -103,6 +103,63 @@
       },
       "unicos": [["nivel", "ref_id", "data_proposta"]],
       "indices": [["nivel", "ref_id"], ["status_aprovacao"], ["tipo_proposta"]]
+    },
+    "parcelamento_dados": {
+      "soft_delete": true,
+      "acesso_externo": "restrito",
+      "colunas": {
+        "parcelamento_id": {
+          "tipo": "inteiro",
+          "obrigatorio": true
+        },
+        "numero_decreto": {
+          "tipo": "texto",
+          "limite": 100
+        },
+        "matricula_id": {
+          "tipo": "inteiro"
+        },
+        "area_poligonal": {
+          "tipo": "decimal",
+          "precisao": 14,
+          "escala": 4
+        },
+        "area_viario": {
+          "tipo": "decimal",
+          "precisao": 14,
+          "escala": 4
+        },
+        "area_servidao": {
+          "tipo": "decimal",
+          "precisao": 14,
+          "escala": 4
+        },
+        "data_envio_projeto": {
+          "tipo": "data"
+        },
+        "data_aprovacao_conplan": {
+          "tipo": "data"
+        },
+        "data_decreto_gdf": {
+          "tipo": "data"
+        },
+        "situacao_registral": {
+          "tipo": "texto",
+          "limite": 20,
+          "padrao": "nenhuma",
+          "opcoes": ["nenhuma", "caucionado", "prenotado"]
+        },
+        "observacao": {
+          "tipo": "texto_longo"
+        },
+        "atualizado_por_id": {
+          "tipo": "referencia",
+          "tabela_ref": "shell.usuarios",
+          "campos_incluir": ["nome as atualizado_por_nome"],
+          "ao_deletar": "anular"
+        }
+      },
+      "unicos": [["parcelamento_id"]]
     }
   }
 }
