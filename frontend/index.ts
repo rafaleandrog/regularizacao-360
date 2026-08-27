@@ -3,6 +3,8 @@ import { customElement, state } from 'lit/decorators.js';
 import { urbiVerso } from './reg360-env.js';
 import { reg360Api, type Proposta } from './reg360-api.js';
 import { falhaDeFlag, type FalhaDeFlag } from './nucleo-cliente.js';
+import { filtrarPorTexto } from '../comum/busca.js';
+import { badgeStatusParcelamento } from '../comum/status-parcelamento.js';
 import { soData } from '../comum/cascata.js';
 
 // urbi-shell-page não está no barrel de primitivos — os demais urbi-* são
@@ -47,19 +49,15 @@ function nomeDe(o: any): string {
   return o?.nome ?? o?.id_legivel ?? o?.slug ?? o?.identificador ?? `#${o?.id ?? '?'}`;
 }
 
-/** Mapeia o status de regularização (calculado pelo Núcleo) para um badge. */
-function badgeRegularizacao(status: unknown): { cor: string; label: string } {
-  const s = String(status ?? '').toLowerCase().replace(/\s+/g, '_');
-  if (s.includes('registrad')) return { cor: 'sucesso', label: 'Registrado' };
-  if (s.includes('aprovad')) return { cor: 'info', label: 'Aprovado' };
-  if (s.includes('analise') || s.includes('análise')) return { cor: 'alerta', label: 'Em análise' };
-  if (s.includes('irregular')) return { cor: 'perigo', label: 'Irregular' };
-  return { cor: 'padrao', label: status ? String(status) : '—' };
-}
-
 interface Rota {
   view: 'home' | 'parcelamentos' | 'unidades' | 'setor' | 'parcelamento' | 'unidade' | 'proposta';
   id: number | null;
+  /**
+   * Filtro de Setor da lista de Parcelamentos. Vai na sub-rota
+   * (`/parcelamentos/setor/2`) e não em query string porque `subRota()` do
+   * shell é montada só do `pathname` — `?setor=2` não chegaria aqui.
+   */
+  filtroSetor?: number | null;
 }
 
 function parseRota(sub: string): Rota {
@@ -68,7 +66,10 @@ function parseRota(sub: string): Rota {
   const [a, b] = partes;
   const id = b ? Number(b) : null;
   switch (a) {
-    case 'parcelamentos': return { view: 'parcelamentos', id: null };
+    case 'parcelamentos': {
+      const setor = partes[1] === 'setor' && partes[2] ? Number(partes[2]) : null;
+      return { view: 'parcelamentos', id: null, filtroSetor: Number.isInteger(setor) ? setor : null };
+    }
     case 'unidades': return { view: 'unidades', id: null };
     case 'setor': return { view: 'setor', id };
     case 'parcelamento': return { view: 'parcelamento', id };
@@ -113,6 +114,9 @@ export class AppReg360 extends LitElement {
   @state() private propostas: Proposta[] = [];
   @state() private vigente: { vigente: Proposta | null; origem_cascata: string | null } | null = null;
   @state() private abaDetalhe = '';
+
+  /** Termo digitado na busca. Transitório de propósito: não vai para a rota. */
+  @state() private termoBusca = '';
 
   /** Flag de Núcleo negada — vira banner explicável, nunca lista vazia. */
   @state() private avisoFlag: FalhaDeFlag | null = null;
@@ -178,7 +182,11 @@ export class AppReg360 extends LitElement {
           void this._varrerLotes();
           break;
         case 'parcelamentos':
+          // Setores vêm junto porque o card mostra o NOME do setor, não o id, e
+          // os chips de filtro saem da lista real — nunca de array literal.
+          this.setores = await reg360Api.setores();
           this.parcelamentos = await reg360Api.parcelamentos();
+          void this._varrerLotes();
           break;
         case 'unidades':
           this.unidades = await reg360Api.unidades();
@@ -452,23 +460,71 @@ export class AppReg360 extends LitElement {
     return `${quantidade.toLocaleString('pt-BR')} ${quantidade === 1 ? 'lote' : 'lotes'}`;
   }
 
+  /** Nome do Setor a partir do id. Card nenhum exibe id cru. */
+  private _nomeSetor(id: unknown): string | null {
+    const sh = this.setores.find((s) => s.id === Number(id));
+    return sh ? nomeDe(sh) : null;
+  }
+
   private _renderListaParcelamentos(): TemplateResult {
+    const filtrados = filtrarPorTexto(
+      this.rota.filtroSetor
+        ? this.parcelamentos.filter((p) => p.setor_habitacional_id === this.rota.filtroSetor)
+        : this.parcelamentos,
+      this.termoBusca,
+      ['nome', 'slug'],
+    );
+
     return html`
-      <urbi-tabela
-        clicavel
-        ?carregando=${this.carregando}
-        mensagemVazio="Nenhum parcelamento"
-        .colunas=${[
-          { id: 'nome', label: 'Nome', valor: (l: any) => nomeDe(l) },
-          { id: 'setor', label: 'Setor', valor: (l: any) => String(l.setor_habitacional_id ?? '—') },
-          { id: 'status', label: 'Status', render: (l: any) => {
-              const b = badgeRegularizacao(l.status_regularizacao);
-              return html`<urbi-badge cor=${b.cor}>${b.label}</urbi-badge>`;
-            } },
-        ]}
-        .linhas=${this.parcelamentos}
-        @urbi:tabela-click=${(e: CustomEvent) => this._navegar(`/parcelamento/${e.detail.linha.id}`)}
-      ></urbi-tabela>
+      <urbi-chips-atalho
+        .opcoes=${this.setores.map((sh) => ({ id: String(sh.id), rotulo: nomeDe(sh) }))}
+        ativo=${this.rota.filtroSetor ? String(this.rota.filtroSetor) : ''}
+        @urbi:chip-atalho:click=${(e: CustomEvent) => {
+          // Clicar no chip ativo desliga o filtro.
+          const id = Number(e.detail.id);
+          this._navegar(this.rota.filtroSetor === id ? '/parcelamentos' : `/parcelamentos/setor/${id}`);
+        }}
+      ></urbi-chips-atalho>
+
+      <urbi-input
+        label="Buscar por nome ou sigla"
+        .valor=${this.termoBusca}
+        @urbi:input-change=${(e: CustomEvent) => { this.termoBusca = String(e.detail.valor ?? ''); }}
+      ></urbi-input>
+
+      ${this.carregando && this.parcelamentos.length === 0
+        ? html`<urbi-loading></urbi-loading>`
+        : filtrados.length === 0
+          ? html`<urbi-estado-vazio
+              icone="fa-solid fa-map"
+              mensagem=${this.parcelamentos.length === 0 ? 'Nenhum parcelamento' : 'Nenhum parcelamento com esse filtro'}
+              submensagem=${this.parcelamentos.length === 0 ? '' : 'Ajuste a busca ou troque o setor.'}
+            ></urbi-estado-vazio>`
+          : html`
+            <urbi-grid min="260px" gap="12px">
+              ${filtrados.map((p) => {
+                const b = badgeStatusParcelamento(p.status);
+                const setor = this._nomeSetor(p.setor_habitacional_id);
+                const ag = this.porParcelamento.get(Number(p.id));
+                return html`
+                  <urbi-card
+                    clicavel
+                    titulo=${nomeDe(p)}
+                    @urbi:card-click=${() => this._navegar(`/parcelamento/${p.id}`)}
+                  >
+                    <urbi-stack>
+                      <urbi-wrap>
+                        ${setor ? html`<urbi-badge cor="padrao">${setor}</urbi-badge>` : nothing}
+                        <urbi-badge cor=${b.cor}>${b.label}</urbi-badge>
+                      </urbi-wrap>
+                      <div class="prop-meta">${p.slug ?? ''}</div>
+                      <div>${this._rotuloLotes(ag?.quantidade ?? 0)}</div>
+                      <div class="prop-meta">Área: ${fmtArea(p.area)} m²</div>
+                    </urbi-stack>
+                  </urbi-card>
+                `;
+              })}
+            </urbi-grid>`}
     `;
   }
 
@@ -514,7 +570,7 @@ export class AppReg360 extends LitElement {
         ? html`<urbi-tabela clicavel
             .colunas=${[
               { id: 'nome', label: 'Nome', valor: (l: any) => nomeDe(l) },
-              { id: 'status', label: 'Status', render: (l: any) => { const b = badgeRegularizacao(l.status_regularizacao); return html`<urbi-badge cor=${b.cor}>${b.label}</urbi-badge>`; } },
+              { id: 'status', label: 'Status', render: (l: any) => { const b = badgeStatusParcelamento(l.status); return html`<urbi-badge cor=${b.cor}>${b.label}</urbi-badge>`; } },
             ]}
             .linhas=${this.parcelamentos}
             @urbi:tabela-click=${(e: CustomEvent) => this._navegar(`/parcelamento/${e.detail.linha.id}`)}
@@ -526,7 +582,7 @@ export class AppReg360 extends LitElement {
   private _renderDetalheParcelamento(): TemplateResult {
     const p = this.detalhe;
     if (!p) return html`<urbi-loading></urbi-loading>`;
-    const b = badgeRegularizacao(p.status_regularizacao);
+    const b = badgeStatusParcelamento(p.status);
     return html`
       <urbi-botao variante="fantasma" icone="fa-solid fa-arrow-left" pequeno @click=${() => this._navegar('/parcelamentos')}>Voltar</urbi-botao>
       <h2>${nomeDe(p)} <urbi-badge cor=${b.cor}>${b.label}</urbi-badge></h2>

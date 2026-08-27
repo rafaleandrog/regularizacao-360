@@ -23,6 +23,21 @@ O app centraliza tudo no UrbiVerso, com:
 
 Toda leitura passa por `frontend/nucleo-cliente.ts`, que pagina em laço, memoriza por sessão e distingue flag desligada de lista vazia. O motivo não é gosto: `req.nucleo` **não lê** no backend, e o Núcleo pagina em 200 sem equivalente ao `varrerTudo`. Ver [leitura-nucleo.md](leitura-nucleo).
 
+## Navegação
+
+| Rota | Tela |
+|---|---|
+| `/` | Setores Habitacionais (cards) |
+| `/setor/:id` | Detalhe do Setor — KPIs, abas Empreendimentos e Propostas |
+| `/parcelamentos` | Lista de Parcelamentos (cards), com busca |
+| `/parcelamentos/setor/:id` | A mesma lista, filtrada por Setor |
+| `/parcelamento/:id` | Detalhe do Parcelamento |
+| `/proposta/:id` | Detalhe da Proposta |
+
+O filtro de Setor vai **na sub-rota**, não em query string: `subRota()` do shell é montada só do `pathname`, então `?setor=2` não chegaria à app. Como está, a tela filtrada é compartilhável e o botão voltar do navegador funciona.
+
+O termo de busca **não** entra na rota — é transitório por decisão, para não poluir o histórico a cada tecla.
+
 ## Divisão Núcleo × App
 
 - **Núcleo** — entidades transversais consumidas por leitura: `setores_habitacionais`, `parcelamentos`, `incorporacoes`, `imoveis` (lote/gleba/unidade), `matriculas`, `pessoas` (física/jurídica). Escrita apenas em `pessoas` (vincular moradores).

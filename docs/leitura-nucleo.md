@@ -64,6 +64,16 @@ A tela renderiza um `urbi-banner` que nomeia o caso e diz o próximo passo. A me
 
 Quais flags o app pede, e quem exige cada uma, está em [operacao.md](operacao#checklist-de-ativação-admin-da-instância).
 
+## Busca: no cliente, não no Núcleo
+
+A lista de Parcelamentos filtra **no cliente**, e isso é decisão, não atalho.
+
+Os 60 parcelamentos já estão em memória — o cliente varre e memoriza o conjunto inteiro. Ir ao servidor a cada tecla desfaria o cache e daria uma resposta mais lenta. E menos tolerante: o `busca` do Núcleo é `ILIKE` sobre as colunas, então **não cruza acento** — quem digita `por do sol` não acharia `Pôr do Sol`.
+
+`comum/busca.ts` normaliza tirando acento e caixa (`NFD` + remoção de diacrítico), e é testado com os nomes reais da instância.
+
+A regra geral continua valendo ao contrário: **quando o conjunto não cabe em memória, o filtro é do Núcleo**. A tabela de Lotes de um parcelamento grande pagina e filtra no servidor; a lista de 60 parcelamentos, não.
+
 ## O que não fazer
 
 - **Não chame `urbiVerso.nucleo` de dentro de uma tela.** Perde cache, paginação e o tratamento de flag.
