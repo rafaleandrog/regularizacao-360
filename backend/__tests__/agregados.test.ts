@@ -134,4 +134,44 @@ describe('somarAgregados', () => {
   test('lista vazia devolve zerado', () => {
     assert.equal(somarAgregados([]).quantidade, 0);
   });
+
+  test('matrícula-mãe partilhada por DOIS parcelamentos conta uma vez no Setor', () => {
+    // Mesma matrícula 900, área 5.000, cobrindo lotes sem área própria em dois
+    // parcelamentos diferentes. Cada agregado já conta 5.000 uma vez; somar os
+    // dois escalares daria 10.000 para uma matrícula que existe uma só vez.
+    const semAreaPropria = (id: number, parcelamentoId: number) =>
+      ({ id, parcelamento_id: parcelamentoId, area: null, area_efetiva: 5000, matricula_id: 900 });
+
+    const p46 = agregarImoveis([semAreaPropria(1, 46), semAreaPropria(2, 46)]);
+    const p47 = agregarImoveis([semAreaPropria(3, 47)]);
+
+    assert.equal(p46.areaTotal, 5000, 'dentro do parcelamento já deduplicava');
+    assert.equal(p46.areasDeduplicadas, 1);
+
+    const setor = somarAgregados([p46, p47]);
+    assert.equal(setor.quantidade, 3);
+    assert.equal(setor.areaTotal, 5000, 'a matrícula não pode ser recontada entre parcelamentos');
+    assert.equal(setor.areasDeduplicadas, 2, 'os 2 lotes repetidos aparecem no número que denuncia');
+  });
+
+  test('área PRÓPRIA nunca deduplica, mesmo com a matrícula repetida', () => {
+    // Aqui cada lote tem área sua; a matrícula ser a mesma é irrelevante.
+    const comAreaPropria = (id: number, parcelamentoId: number) =>
+      ({ id, parcelamento_id: parcelamentoId, area: 300, area_efetiva: 300, matricula_id: 900 });
+
+    const setor = somarAgregados([
+      agregarImoveis([comAreaPropria(1, 46), comAreaPropria(2, 46)]),
+      agregarImoveis([comAreaPropria(3, 47)]),
+    ]);
+    assert.equal(setor.areaTotal, 900);
+    assert.equal(setor.areasDeduplicadas, 0);
+  });
+
+  test('agregados zerados não compartilham o mesmo Map', () => {
+    // `{ ...CONSTANTE }` copiaria a referência e um mutaria o outro.
+    const x = agregarImoveis([]);
+    const y = agregarImoveis([]);
+    x.areaPorMatricula.set(1, 10);
+    assert.equal(y.areaPorMatricula.size, 0);
+  });
 });

@@ -29,12 +29,29 @@ export interface Agregado {
   comValor: number;
   /** Matrículas-mãe compartilhadas cuja área foi contada uma vez só. */
   areasDeduplicadas: number;
+  /** Soma só das áreas PRÓPRIAS — a parcela de `areaTotal` que nunca deduplica. */
+  areaPropria: number;
+  /**
+   * Área herdada, por matrícula-mãe. Existe para que somar agregados NÃO
+   * reconte o que cada um já deduplicou: a mesma matrícula pode cobrir lotes
+   * de dois parcelamentos do mesmo Setor, e um número escalar não carrega a
+   * identidade necessária para perceber isso na soma.
+   */
+  areaPorMatricula: Map<number, number>;
 }
 
-const VAZIO: Agregado = {
-  quantidade: 0, areaTotal: 0, areaPrivativa: null, vgv: 0,
-  semPreco: 0, semArea: 0, comValor: 0, areasDeduplicadas: 0,
-};
+/**
+ * Agregado zerado. É FUNÇÃO, não constante: espalhar uma constante copiaria a
+ * REFERÊNCIA do `Map`, e dois agregados "vazios" passariam a compartilhar a
+ * mesma instância — um mutando o outro em silêncio.
+ */
+function vazio(): Agregado {
+  return {
+    quantidade: 0, areaTotal: 0, areaPrivativa: null, vgv: 0,
+    semPreco: 0, semArea: 0, comValor: 0, areasDeduplicadas: 0,
+    areaPropria: 0, areaPorMatricula: new Map(),
+  };
+}
 
 function numero(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
@@ -108,14 +125,14 @@ export interface OpcoesAgregar {
  */
 export function agregarImoveis(lotes: any[], opcoes: OpcoesAgregar = {}): Agregado {
   const lista = lotes || [];
-  if (lista.length === 0) return { ...VAZIO };
+  if (lista.length === 0) return vazio();
 
   const dados = opcoes.dadosPorImovel ?? new Map();
   const vigentes = opcoes.vigentes ?? new Map();
   const setorPor = opcoes.setorPorParcelamento ?? new Map();
 
-  const matriculasHerdadasContadas = new Set<number>();
-  let areaTotal = 0;
+  const areaPorMatricula = new Map<number, number>();
+  let areaPropriaTotal = 0;
   let vgv = 0;
   let semPreco = 0;
   let semArea = 0;
@@ -127,18 +144,16 @@ export function agregarImoveis(lotes: any[], opcoes: OpcoesAgregar = {}): Agrega
     const areaEfetiva = numero(l?.area_efetiva ?? l?.area);
     const matriculaId = numero(l?.matricula_id);
 
-    // Área herdada da matrícula: conta uma vez por matrícula.
+    // Área herdada da matrícula: conta uma vez por matrícula. Guardar POR
+    // matrícula, em vez de só somar, é o que deixa a soma de agregados
+    // deduplicar também ENTRE parcelamentos.
     if (areaEfetiva !== null) {
       const herdada = areaPropria === null && matriculaId !== null;
       if (herdada) {
-        if (matriculasHerdadasContadas.has(matriculaId)) {
-          areasDeduplicadas += 1;
-        } else {
-          matriculasHerdadasContadas.add(matriculaId);
-          areaTotal += areaEfetiva;
-        }
+        if (areaPorMatricula.has(matriculaId)) areasDeduplicadas += 1;
+        else areaPorMatricula.set(matriculaId, areaEfetiva);
       } else {
-        areaTotal += areaEfetiva;
+        areaPropriaTotal += areaEfetiva;
       }
     }
 
@@ -162,26 +177,48 @@ export function agregarImoveis(lotes: any[], opcoes: OpcoesAgregar = {}): Agrega
 
   return {
     quantidade: lista.length,
-    areaTotal,
+    areaTotal: areaPropriaTotal + somaDoMapa(areaPorMatricula),
     areaPrivativa: null,
     vgv,
     semPreco,
     semArea,
     comValor,
     areasDeduplicadas,
+    areaPropria: areaPropriaTotal,
+    areaPorMatricula,
   };
 }
 
-/** Soma agregados já calculados — o Setor soma os parcelamentos, sem revarrer. */
+function somaDoMapa(m: Map<number, number>): number {
+  let s = 0;
+  for (const v of m.values()) s += v;
+  return s;
+}
+
+/**
+ * Soma agregados já calculados — o Setor soma os parcelamentos, sem revarrer.
+ *
+ * **A área não é soma simples.** Cada parte já deduplicou a matrícula-mãe
+ * DENTRO dela; somar os totais recontaria a matrícula que cobre lotes de dois
+ * parcelamentos do mesmo Setor, e o número inflado não teria como se denunciar.
+ * Por isso a soma une os mapas de área herdada em vez de somar escalares, e a
+ * repetição entre partes entra em `areasDeduplicadas` como qualquer outra.
+ */
 export function somarAgregados(partes: Agregado[]): Agregado {
-  return (partes || []).reduce<Agregado>((acc, a) => ({
-    quantidade: acc.quantidade + a.quantidade,
-    areaTotal: acc.areaTotal + a.areaTotal,
-    areaPrivativa: null,
-    vgv: acc.vgv + a.vgv,
-    semPreco: acc.semPreco + a.semPreco,
-    semArea: acc.semArea + a.semArea,
-    comValor: acc.comValor + a.comValor,
-    areasDeduplicadas: acc.areasDeduplicadas + a.areasDeduplicadas,
-  }), { ...VAZIO });
+  const acc = vazio();
+  for (const a of partes || []) {
+    acc.quantidade += a.quantidade;
+    acc.vgv += a.vgv;
+    acc.semPreco += a.semPreco;
+    acc.semArea += a.semArea;
+    acc.comValor += a.comValor;
+    acc.areasDeduplicadas += a.areasDeduplicadas;
+    acc.areaPropria += a.areaPropria;
+    for (const [matriculaId, area] of a.areaPorMatricula) {
+      if (acc.areaPorMatricula.has(matriculaId)) acc.areasDeduplicadas += 1;
+      else acc.areaPorMatricula.set(matriculaId, area);
+    }
+  }
+  acc.areaTotal = acc.areaPropria + somaDoMapa(acc.areaPorMatricula);
+  return acc;
 }

@@ -190,6 +190,15 @@ export class AppReg360 extends LitElement {
   @state() private vigentesPorAlvo = new Map<string, any>();
   @state() private precosPorImovel = new Map<string, any>();
   @state() private carregandoVgv = false;
+  /**
+   * Bases do VGV já carregadas nesta sessão.
+   *
+   * Campo próprio, e não `vigentesPorAlvo.size > 0`: derivar disso erra dos
+   * DOIS lados — com zero propostas a memória nunca trava e cada navegação
+   * revarre tudo; depois de carregada, nada consegue invalidá-la, e gravar um
+   * preço deixa cards e KPIs mostrando o valor velho até um reload.
+   */
+  @state() private basesDoVgvCarregadas = false;
 
   @state() private formAberto = false;
   @state() private formModo: 'criar' | 'copiar' = 'criar';
@@ -281,6 +290,11 @@ export class AppReg360 extends LitElement {
             void this._carregarMatriculas();
             void this._carregarPessoasDaPagina();
             void this._carregarRegularizacao();
+            // Sem isto, abrir a página direto (ou dar reload nela) renderiza o
+            // VGV com as bases vazias: R$ 0 e "todos sem preço", com cara de
+            // resposta. Não precisa varrer os lotes da instância — os lotes
+            // deste parcelamento já vieram acima.
+            void this._carregarBasesDoVgv();
           }
           break;
         case 'lote':
@@ -497,6 +511,8 @@ export class AppReg360 extends LitElement {
     try {
       this.carregando = true;
       this.dadosDoImovel = await fn();
+      // O preço deste imóvel entra no VGV do parcelamento e do setor.
+      await this._recarregarBasesDoVgv();
       urbiVerso.notificar?.(sucesso, 'sucesso');
     } catch (e: any) {
       urbiVerso.notificar?.(e?.message || 'Falha ao salvar preço', 'erro');
@@ -567,7 +583,7 @@ export class AppReg360 extends LitElement {
    * Cada uma é uma varredura só, memorizada; o resto é conta no cliente.
    */
   private async _carregarBasesDoVgv() {
-    if (this.vigentesPorAlvo.size > 0 || this.carregandoVgv) return;
+    if (this.basesDoVgvCarregadas || this.carregandoVgv) return;
     this.carregandoVgv = true;
     try {
       const [propostas, precos] = await Promise.all([
@@ -578,6 +594,7 @@ export class AppReg360 extends LitElement {
       this.precosPorImovel = new Map(
         (precos?.dados || []).map((d: any) => [chaveImovel(d.imovel_id, d.imovel_tipo), d]),
       );
+      this.basesDoVgvCarregadas = true;
     } catch (e: any) {
       this._registrarFalha(e, 'Falha ao carregar as bases de preço');
     } finally {
@@ -585,11 +602,34 @@ export class AppReg360 extends LitElement {
     }
   }
 
+  /**
+   * Gravar preço ou aprovar proposta muda o VGV de todo mundo, não só a tela
+   * aberta: a base memorizada precisa cair junto, senão os cards continuam
+   * exibindo o número anterior com cara de atual.
+   */
+  private async _recarregarBasesDoVgv() {
+    if (!this.basesDoVgvCarregadas && !this.carregandoVgv) return;
+    this.basesDoVgvCarregadas = false;
+    this.vigentesPorAlvo = new Map();
+    this.precosPorImovel = new Map();
+    await this._carregarBasesDoVgv();
+  }
+
   /** Setor de cada parcelamento — último elo da cascata no agregado. */
   private get _setorPorParcelamento(): Map<number, number> {
-    return new Map(this.parcelamentos
+    const mapa = new Map(this.parcelamentos
       .filter((p) => p.setor_habitacional_id)
       .map((p) => [Number(p.id), Number(p.setor_habitacional_id)]));
+    // Abrir `/parcelamento/:id` direto não passa pela lista, então
+    // `this.parcelamentos` está vazio e o elo de Setor da cascata sumiria — e é
+    // no Setor que mora o preço-base que quase sempre existe. O par vem do
+    // próprio detalhe, que já traz `setor_habitacional_id`: nenhuma requisição
+    // a mais.
+    const d = this.detalhe;
+    if (this.rota.view === 'parcelamento' && d?.id && d?.setor_habitacional_id) {
+      mapa.set(Number(d.id), Number(d.setor_habitacional_id));
+    }
+    return mapa;
   }
 
   private _agregarLotes(lotes: any[]): Agregado {
@@ -611,7 +651,6 @@ export class AppReg360 extends LitElement {
    * silenciosamente parte dos lotes é pior que nenhum número.
    */
   private _rotuloCobertura(a: Agregado): string {
-    if (this.carregandoVgv) return 'calculando…';
     if (a.quantidade === 0) return '';
     if (a.comValor === a.quantidade) return `sobre os ${a.quantidade} lotes`;
     const fora: string[] = [];
@@ -693,6 +732,7 @@ export class AppReg360 extends LitElement {
       urbiVerso.notificar?.('Proposta salva', 'sucesso');
       this.formAberto = false;
       await this._carregarPropostas(this.formNivel, this.formRefId);
+      await this._recarregarBasesDoVgv();
     } catch (e: any) {
       urbiVerso.notificar?.(e?.message || 'Falha ao salvar proposta', 'erro');
     } finally {
@@ -705,6 +745,9 @@ export class AppReg360 extends LitElement {
       await reg360Api.aprovarProposta(p.id);
       urbiVerso.notificar?.('Proposta aprovada', 'sucesso');
       await this._carregarPropostas(p.nivel, p.ref_id);
+      // Aprovar é o que torna a proposta vigente — é a mutação que mais muda
+      // o VGV, e a que mais enganaria se a base continuasse a antiga.
+      await this._recarregarBasesDoVgv();
     } catch (e: any) {
       urbiVerso.notificar?.(e?.message || 'Falha ao aprovar', 'erro');
     }
@@ -1229,8 +1272,23 @@ export class AppReg360 extends LitElement {
    * contratos assinados. Confere com a tela do legado — Bianca tem VGV de
    * R$ 6,8 mi com 5,26% de adesão, então não pode ser realizado.
    */
+  /**
+   * VGV calculado sobre base ausente vale ZERO e parece uma resposta: "R$ 0,00,
+   * 1.220 lotes sem preço" é indistinguível de um parcelamento realmente sem
+   * preço nenhum. Enquanto propostas e preços não estiverem em memória, o
+   * painel diz o que está acontecendo em vez de mostrar número.
+   */
   private _renderVgv(a: Agregado): TemplateResult {
     if (a.quantidade === 0) return html`${nothing}`;
+    if (!this.basesDoVgvCarregadas) {
+      return html`
+        <p class="prop-meta">
+          ${this.carregandoVgv
+            ? 'Calculando o VGV — carregando propostas e preços…'
+            : 'VGV indisponível: as bases de propostas e preços não carregaram.'}
+        </p>
+      `;
+    }
     return html`
       <urbi-wrap>
         <urbi-kpi rotulo="VGV potencial" .valor=${fmtMoeda(a.vgv)} formato="texto"></urbi-kpi>
