@@ -1,0 +1,74 @@
+# CLAUDE.md — Regularização 360 (`reg360`)
+
+App UrbiVerso de regularização fundiária da Fazenda Paranoazinho, em repositório próprio. Distribuída como `.urbiapp.tgz` via GitHub Release e instalada por `Admin → Apps`.
+
+## Rastreabilidade de issue — a regra que mais falha calada
+
+**Todo PR fecha suas issues pela keyword, e depois do merge alguém confere que elas fecharam.**
+
+O GitHub vincula PR→issue exclusivamente por `close`/`closes`/`closed`, `fix`/`fixes`/`fixed`, `resolve`/`resolves`/`resolved`. Três detalhes falham **sem erro nenhum**:
+
+- **`Fecha #12` não fecha nada.** Só a keyword em inglês vale. O PR mergeia, a issue fica aberta, e ninguém percebe — a falha é ausência, não erro.
+- **A keyword repete por issue.** `Closes #1, #2` fecha **só a #1**. Escreva `Closes #1, closes #2`.
+- **Só vale no corpo do PR ou na mensagem de commit** — nunca no título.
+
+Por isso a conferência é obrigatória e não opcional: **depois de mergear, liste as issues fechadas e confirme**, em vez de assumir. Um `Closes` que não disparou é indistinguível de um que disparou, até alguém contar.
+
+### Quando a entrega é parcial
+
+Issue meio-feita **continua aberta**, com um comentário dizendo exatamente **o que falta e por quê**. O PR then declara só as issues que fecha de fato.
+
+Fechar uma issue "porque a maior parte foi" é como o backlog vira ficção: a metade que faltou some, e o próximo a ler acha que está pronto.
+
+### Quando o trabalho chega antes da issue
+
+Às vezes um PR resolve, de passagem, parte de uma issue de outra onda — porque a tela precisava daquilo para funcionar. Nesse caso, **comente na issue antecipada** dizendo o que já existe e o que sobrou.
+
+Sem esse comentário, quem pega a issue depois reimplementa o que já está no ar, ou pior: cria uma segunda fonte da verdade para a mesma conta.
+
+### O que não entra num PR
+
+Controle que só falha é pior que controle ausente:
+
+- **Botão que a API vai recusar.** Se o schema ainda não aceita o valor, não ofereça o botão — deixe uma linha dizendo onde fazer, e a issue que o habilita.
+- **Link para tela que não existe.** Chip clicável sem destino é defeito, não adiantamento.
+
+Nos dois casos, registre no corpo do PR o que ficou de fora e qual issue entrega.
+
+## Verificação antes de pedir merge
+
+```bash
+pnpm install && pnpm typecheck && pnpm test && pnpm build
+```
+
+Os quatro limpos, e o CI de PR verde. O CI roda `.github/workflows/ci.yml`; o release é outro workflow, disparado por tag.
+
+**Documentação anda no mesmo PR que o código.** Mudou comportamento, mudou `docs/`. Feature sem doc não está completa.
+
+**Capacidade de API sem controle na tela não entra** — e vice-versa. Endpoint com parâmetro que nenhuma tela usa é feature invisível: ninguém descobre, ninguém testa, e ela apodrece divergindo do que a tela faz.
+
+## O que morde quem chega agora
+
+**O `@urbiverso/sdk` é privado.** Instalar exige PAT *classic* com `read:packages` (o registry do GitHub não autentica fine-grained). Sem ele, `pnpm install` falha e leva junto `typecheck`, `test` e `build`. No CI, o segredo `URBIVERSO_PACKAGES_TOKEN` resolve.
+
+**`backend/rotas.ts` precisa de `import '@urbiverso/sdk/express'`.** A augmentation que tipa `req.dados`, `req.contexto`, `req.eventos` e `req.shell` é opcional e **não vem pelo barrel**. Sem a linha, o `tsc` acusa dezenas de `Property 'dados' does not exist on type 'Request'`.
+
+**O piso de plataforma se mede contra o SDK publicado**, nunca contra o `main` do monorepo — que está sempre à frente do que foi cunhado. `shell_min` e `sdk_min` no `manifesto.json` são pisos independentes e cumulativos.
+
+**Teste de app é na instância intermediária** (Pinguim), nunca na de desenvolvimento: ela roda build não homologado, e aviso de obsolescência lido lá é sinal errado.
+
+## Três restrições do Núcleo que decidem o desenho das telas
+
+Detalhadas em [`docs/leitura-nucleo.md`](docs/leitura-nucleo.md). Em resumo:
+
+1. **`req.nucleo` não lê.** Só `batch`, `chamarSubrecurso`, `atualizar` e `buscarPorChave`. Toda agregação é no **frontend**.
+2. **Sem leitura em lote por lista de ids.** `GET /matriculas` não filtra por id; `imovel_pessoas` só existe em `GET /lotes/:id/pessoas`. Daí a varredura memorizada e a janela de concorrência.
+3. **Filtro fora da allowlist é ignorado em silêncio**, não rejeitado. `GET /unidades?parcelamento_id=N` devolvia a instância inteira — a coluna nem existe.
+
+**O objeto de navegação é o Lote, não a Unidade.** No Núcleo, `unidades.incorporacao_id` é NOT NULL: unidade só existe sob incorporação. A premissa da spec v0.9 de que "todo lote gera 1 unidade default" nunca virou realidade.
+
+**Não reimplemente o que o Núcleo entrega pronto**: `id_legivel`, `cpf_formatado`, `telefone_formatado`, `area_efetiva`, status derivado. Remontar cria uma segunda verdade que diverge.
+
+## Escopo
+
+O monorepo `urbiverso/urbiverso` é **somente leitura** para este trabalho. Campo que falta no Núcleo vira tabela no schema `reg360`, com referência lógica por id — nunca FK.

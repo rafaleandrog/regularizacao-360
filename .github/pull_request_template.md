@@ -22,6 +22,12 @@ Closes #
 pnpm install && pnpm typecheck && pnpm test && pnpm build
 ```
 
+## Depois de mergear
+
+- [ ] Conferi que as issues declaradas **realmente fecharam** (a keyword falha sem erro).
+- [ ] Issue entregue pela metade continua aberta, com comentário dizendo o que falta.
+- [ ] Comentei em issue de outra onda cujo escopo este PR antecipou, se houve.
+
 ## Docs
 
 <!-- Qual doc do app foi atualizado NESTE PR. Doc e código andam juntos:
