@@ -10,7 +10,7 @@ import {
   apenasEditaveis,
   amanha,
   dentroDaJanelaVencimento,
-} from '../../comum/cascata.ts';
+} from '../../comum/cascata.js';
 
 // Helper: replica o laço da rota GET /propostas/vigente sobre a cadeia,
 // escolhendo a primeira vigente do mais específico ao mais geral.

@@ -1,3 +1,7 @@
+// Augmentation OPCIONAL do Express: tipa os helpers que o shell injeta em
+// `req` (dados, contexto, eventos, shell, nucleo...). O SDK não a aplica pelo
+// barrel — sem esta linha, `req.dados` não existe para o tsc.
+import '@urbiverso/sdk/express';
 import { Router } from 'express';
 import {
   hoje,
@@ -244,6 +248,9 @@ rotas.post('/propostas/:id/aprovar', async (req, res) => {
       status_aprovacao: 'aprovada',
       aprovado_por_id: req.contexto?.usuario?.id ?? null,
     });
+    // `atualizar` devolve null quando a linha nao existe mais — a proposta pode
+    // ter sido removida entre o `buscar` acima e este update.
+    if (!aprovada) return erro(res, 404, 'REG360_NAO_ENCONTRADA', 'Proposta não encontrada');
 
     await publicarSeguro(req, 'proposta_aprovada', {
       proposta_id: aprovada.id,
