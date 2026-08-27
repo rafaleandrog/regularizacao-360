@@ -5,6 +5,7 @@ import '@urbiverso/sdk/express';
 import { Router } from 'express';
 import { rotasParcelamentoDados } from './parcelamento-dados.js';
 import { rotasImovelDados } from './imovel-dados.js';
+import { rotasAcoes } from './acoes.js';
 import {
   hoje,
   amanha,
@@ -44,6 +45,7 @@ const POR_PAGINA_MAX = 100;
 // o depósito de tudo conforme as ondas entram.
 rotas.use(rotasParcelamentoDados);
 rotas.use(rotasImovelDados);
+rotas.use(rotasAcoes);
 
 // ---------------------------------------------------------------------------
 // Autorização

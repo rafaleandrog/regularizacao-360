@@ -213,6 +213,97 @@
       },
       "unicos": [["imovel_id", "imovel_tipo"]],
       "indices": [["imovel_tipo", "quitado"]]
+    },
+    "acoes": {
+      "soft_delete": true,
+      "acesso_externo": "restrito",
+      "colunas": {
+        "tipo": {
+          "tipo": "texto",
+          "limite": 40,
+          "obrigatorio": true,
+          "opcoes": ["revisional", "obrigacao_de_fazer", "outra"]
+        },
+        "polo": {
+          "tipo": "texto",
+          "limite": 20,
+          "obrigatorio": true,
+          "opcoes": ["up_contra", "contra_up"]
+        },
+        "data": {
+          "tipo": "data"
+        },
+        "numero_processo": {
+          "tipo": "texto",
+          "limite": 60
+        },
+        "valor": {
+          "tipo": "decimal",
+          "precisao": 14,
+          "escala": 2
+        },
+        "descricao": {
+          "tipo": "texto_longo"
+        },
+        "status": {
+          "tipo": "texto",
+          "limite": 20,
+          "obrigatorio": true,
+          "padrao": "ativa",
+          "opcoes": ["ativa", "encerrada", "suspensa"]
+        },
+        "criado_por_id": {
+          "tipo": "referencia",
+          "tabela_ref": "shell.usuarios",
+          "campos_incluir": ["nome as criador_nome"],
+          "ao_deletar": "anular"
+        }
+      },
+      "indices": [["status"], ["tipo"]]
+    },
+    "acao_imoveis": {
+      "soft_delete": true,
+      "acesso_externo": "restrito",
+      "colunas": {
+        "acao_id": {
+          "tipo": "inteiro",
+          "obrigatorio": true
+        },
+        "imovel_id": {
+          "tipo": "inteiro",
+          "obrigatorio": true
+        },
+        "imovel_tipo": {
+          "tipo": "texto",
+          "limite": 10,
+          "obrigatorio": true,
+          "opcoes": ["lote", "unidade"]
+        }
+      },
+      "unicos": [["acao_id", "imovel_id", "imovel_tipo"]],
+      "indices": [["imovel_tipo", "imovel_id"], ["acao_id"]]
+    },
+    "acao_pessoas": {
+      "soft_delete": true,
+      "acesso_externo": "restrito",
+      "colunas": {
+        "acao_id": {
+          "tipo": "inteiro",
+          "obrigatorio": true
+        },
+        "pessoa_id": {
+          "tipo": "inteiro",
+          "obrigatorio": true
+        },
+        "papel": {
+          "tipo": "texto",
+          "limite": 20,
+          "padrao": "interessado",
+          "opcoes": ["autor", "reu", "interessado"]
+        }
+      },
+      "unicos": [["acao_id", "pessoa_id"]],
+      "indices": [["pessoa_id"], ["acao_id"]]
     }
   }
 }

@@ -1,7 +1,7 @@
 import { LitElement, html, css, nothing, type TemplateResult } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { urbiVerso } from './reg360-env.js';
-import { reg360Api, type Proposta } from './reg360-api.js';
+import { reg360Api, type Proposta, type Acao, type NovaAcao } from './reg360-api.js';
 import { falhaDeFlag, type FalhaDeFlag } from './nucleo-cliente.js';
 import { filtrarPorTexto, normalizarTexto } from '../comum/busca.js';
 import { mapaComLimite } from '../comum/concorrencia.js';
@@ -15,6 +15,20 @@ import {
   FASES, SITUACOES_REGISTRAIS,
 } from '../comum/regularizacao.js';
 import { soData, hoje, statusVigencia, type StatusVigencia } from '../comum/cascata.js';
+import {
+  badgeAcao,
+  destacaNoCabecalho,
+  tituloAcao,
+  ROTULO_PAPEL,
+  ROTULO_STATUS,
+  ROTULO_TIPO,
+  TIPOS_ACAO,
+  POLOS,
+  STATUS_ACAO,
+  PAPEIS_PESSOA,
+  type TipoAcao,
+  type PapelPessoa,
+} from '../comum/acoes.js';
 
 // urbi-shell-page não está no barrel de primitivos — os demais urbi-* são
 // registrados globalmente pelo shell (ui/src/primitivos.ts).
@@ -200,6 +214,12 @@ export class AppReg360 extends LitElement {
    */
   @state() private basesDoVgvCarregadas = false;
 
+  /** Ações do imóvel aberto, com os vínculos que a rota já devolve junto. */
+  @state() private acoes: Acao[] = [];
+  @state() private carregandoAcoes = false;
+  @state() private buscaAcaoPessoa = '';
+  @state() private formAcao: Record<string, any> | null = null;
+
   @state() private formAberto = false;
   @state() private formModo: 'criar' | 'copiar' = 'criar';
   @state() private formOrigemId: number | null = null;
@@ -308,6 +328,7 @@ export class AppReg360 extends LitElement {
             await this._carregarPropostas(this.rota.view, this.rota.id);
             if (ehLote) this.pessoasPorLote = new Map([[this.rota.id, await reg360Api.pessoasDoLote(this.rota.id)]]);
             void this._carregarMatriculas();
+            void this._carregarAcoes();
             // O contexto vem ANTES da cascata: sem o parcelamento resolvido não
             // se sabe o setor, e o elo de Setor da cadeia seria pulado — a
             // unidade não herdaria o preço-base que sempre existe lá.
@@ -500,6 +521,125 @@ export class AppReg360 extends LitElement {
     } catch (e: any) {
       this._registrarFalha(e, 'Falha ao carregar preços do imóvel');
     }
+  }
+
+  /**
+   * Ações do imóvel aberto.
+   *
+   * Uma requisição só: a rota devolve os vínculos de imóvel e de pessoa junto
+   * com cada ação, então a tela não precisa buscar um por um. Ação sobre pessoa
+   * sem imóvel **não** aparece aqui — ela vive na tela da pessoa, que a #33
+   * ainda vai criar.
+   */
+  private async _carregarAcoes() {
+    this.acoes = [];
+    if (!this.rota.id) return;
+    this.carregandoAcoes = true;
+    try {
+      const r = await reg360Api.listarAcoes({
+        imovel_id: this.rota.id,
+        imovel_tipo: this.rota.view,
+      });
+      this.acoes = r?.dados || [];
+    } catch (e: any) {
+      this._registrarFalha(e, 'Falha ao carregar as ações');
+    } finally {
+      this.carregandoAcoes = false;
+    }
+  }
+
+  /** Ações que viram badge no cabeçalho: só as ativas. */
+  private get _acoesEmDestaque(): Acao[] {
+    return this.acoes.filter((a) => destacaNoCabecalho(a));
+  }
+
+  /**
+   * Filtro por pessoa dentro da aba. A busca é sobre os ocupantes já conhecidos
+   * do lote — o vínculo guarda `pessoa_id`, e o nome vem de `pessoasPorLote`.
+   */
+  private get _acoesFiltradas(): Acao[] {
+    const alvo = normalizarTexto(this.buscaAcaoPessoa);
+    if (!alvo) return this.acoes;
+    return this.acoes.filter((a) =>
+      (a.pessoas || []).some((v) => normalizarTexto(this._nomeDaPessoa(v.pessoa_id)).includes(alvo)),
+    );
+  }
+
+  /**
+   * Nome de uma pessoa vinculada, a partir dos ocupantes do lote.
+   *
+   * O vínculo aponta para o Núcleo por id lógico, e o backend não lê o Núcleo:
+   * id que não resolve vira `#123`, à mostra, em vez de sumir da tela.
+   */
+  private _nomeDaPessoa(pessoaId: unknown): string {
+    const id = Number(pessoaId);
+    for (const lista of this.pessoasPorLote.values()) {
+      const achada = (lista || []).find((v: any) => Number(v.pessoa_id) === id);
+      if (achada) return String(achada.nome ?? achada.razao_social ?? `#${id}`);
+    }
+    return `#${id}`;
+  }
+
+  private async _acaoDeAcao(fn: () => Promise<any>, sucesso: string) {
+    try {
+      this.carregando = true;
+      await fn();
+      urbiVerso.notificar?.(sucesso, 'sucesso');
+      await this._carregarAcoes();
+    } catch (e: any) {
+      urbiVerso.notificar?.(e?.message || 'Falha ao salvar a ação', 'erro');
+    } finally {
+      this.carregando = false;
+    }
+  }
+
+  /**
+   * Abre o formulário. Criando a partir do lote, o próprio lote já entra
+   * vinculado — é o caso comum, e obrigar a selecioná-lo de novo seria pedir
+   * ao usuário que repita o que a tela já sabe.
+   */
+  private _abrirFormAcao(existente?: Acao) {
+    this.formAcao = existente
+      ? { ...existente, editandoId: existente.id }
+      : {
+          tipo: 'revisional',
+          polo: 'contra_up',
+          status: 'ativa',
+          data: '',
+          numero_processo: '',
+          valor: '',
+          descricao: '',
+          editandoId: null,
+        };
+  }
+
+  private _salvarFormAcao() {
+    const f = this.formAcao;
+    if (!f) return;
+    const corpo: NovaAcao = {
+      tipo: String(f.tipo),
+      polo: String(f.polo),
+      status: String(f.status),
+      data: f.data || null,
+      numero_processo: f.numero_processo || null,
+      valor: f.valor === '' || f.valor === null ? null : Number(String(f.valor).replace(',', '.')),
+      descricao: f.descricao || null,
+    };
+    if (corpo.valor !== null && !Number.isFinite(corpo.valor)) {
+      return urbiVerso.notificar?.('Valor inválido', 'erro');
+    }
+    const id = Number(this.rota.id);
+    const editandoId = f.editandoId;
+    this.formAcao = null;
+    void this._acaoDeAcao(
+      () => (editandoId
+        ? reg360Api.editarAcao(Number(editandoId), corpo)
+        // O imóvel aberto entra junto na criação — a rota exige ao menos um
+        // vínculo, e criar-e-vincular em duas chamadas deixaria ação órfã se a
+        // segunda falhasse.
+        : reg360Api.criarAcao({ ...corpo, imoveis: [{ imovel_id: id, imovel_tipo: String(this.rota.view) }] })),
+      editandoId ? 'Ação atualizada' : 'Ação registrada',
+    );
   }
 
   /** Preço que vale para o imóvel aberto, com a origem. */
@@ -785,6 +925,7 @@ export class AppReg360 extends LitElement {
       ${this.formAberto ? this._renderForm() : nothing}
       ${this.formRegAberto ? this._renderFormRegularizacao() : nothing}
       ${this.formPreco ? this._renderFormPreco() : nothing}
+      ${this.formAcao ? this._renderFormAcao() : nothing}
     `;
   }
 
@@ -1140,6 +1281,10 @@ export class AppReg360 extends LitElement {
         ${this.paiDoImovel.incorporacao
           ? html`<urbi-badge cor="info">${nomeDe(this.paiDoImovel.incorporacao)}</urbi-badge>`
           : nothing}
+        ${this._acoesEmDestaque.map((a) => {
+          const b = badgeAcao(a);
+          return html`<urbi-badge cor=${b.cor}>${b.rotulo}</urbi-badge>`;
+        })}
       </urbi-wrap>
       ${ocupantes.length > 0
         ? html`<urbi-wrap>${ocupantes.map((v: any) =>
@@ -1174,7 +1319,7 @@ export class AppReg360 extends LitElement {
         .abas=${[
           { id: 'propostas', label: 'Propostas Vigentes' },
           { id: 'transacoes', label: 'Transações', dot: 'aviso' },
-          { id: 'acoes', label: 'Ações', dot: 'aviso' },
+          { id: 'acoes', label: 'Ações', ...(this._acoesEmDestaque.length > 0 ? { dot: 'aviso' } : {}) },
         ]}
         ativa=${this.abaDetalhe}
         @urbi:aba-selecionar=${(e: CustomEvent) => { this.abaDetalhe = e.detail.id; }}
@@ -1183,8 +1328,7 @@ export class AppReg360 extends LitElement {
         ? html`<urbi-estado-vazio icone="fa-solid fa-clock" mensagem="Transações em breve"
             submensagem="A entidade Transação ainda não existe no Núcleo. Ver issue #36."></urbi-estado-vazio>`
         : this.abaDetalhe === 'acoes'
-          ? html`<urbi-estado-vazio icone="fa-solid fa-gavel" mensagem="Ações em breve"
-              submensagem="Ações judiciais entram na Onda 4. Ver issues #30 a #32."></urbi-estado-vazio>`
+          ? this._renderAcoes(u)
           : this._renderPropostasVigentes(this.rota.view, u.id)}
     `;
   }
@@ -1305,6 +1449,122 @@ export class AppReg360 extends LitElement {
           ? html` Área privativa depende do catálogo de Uso (issue #22) e ainda não é separável.`
           : nothing}
       </p>
+    `;
+  }
+
+  /**
+   * Aba de Ações do imóvel.
+   *
+   * O título de cada card sai de `tituloAcao`, em `comum/acoes.ts` — a mesma
+   * função do badge e de qualquer listagem futura. Montar o título aqui também
+   * é como os dois divergem no dia em que um deles muda.
+   */
+  private _renderAcoes(u: any): TemplateResult {
+    const lista = this._acoesFiltradas;
+    return html`
+      ${this.podeCriar
+        ? html`<div class="barra-acoes">
+            <urbi-botao variante="primario" pequeno icone="fa-solid fa-gavel"
+              @click=${() => this._abrirFormAcao()}>Criar ação</urbi-botao>
+          </div>`
+        : nothing}
+      <urbi-input label="Buscar por pessoa vinculada" .valor=${this.buscaAcaoPessoa}
+        @urbi:input-change=${(e: CustomEvent) => { this.buscaAcaoPessoa = String(e.detail.valor ?? ''); }}></urbi-input>
+      ${this.carregandoAcoes
+        ? html`<urbi-loading></urbi-loading>`
+        : lista.length === 0
+          ? html`<urbi-estado-vazio icone="fa-solid fa-gavel"
+              mensagem=${this.acoes.length === 0 ? 'Nenhuma ação neste imóvel' : 'Nenhuma ação com esse filtro'}
+              submensagem=${this.acoes.length === 0
+                ? 'Ação que existe só contra uma pessoa, sem imóvel, aparece na tela dela.'
+                : ''}></urbi-estado-vazio>`
+          : html`<urbi-stack>${lista.map((a) => this._renderCardAcao(a, u))}</urbi-stack>`}
+    `;
+  }
+
+  private _renderCardAcao(a: Acao, u: any): TemplateResult {
+    const b = badgeAcao(a);
+    return html`
+      <urbi-card>
+        <urbi-wrap>
+          <urbi-badge cor=${b.cor}>${b.rotulo}</urbi-badge>
+          ${a.status !== 'ativa'
+            ? html`<urbi-badge cor="padrao">${ROTULO_STATUS[a.status] ?? a.status}</urbi-badge>`
+            : nothing}
+        </urbi-wrap>
+        <p class="secao-titulo">${tituloAcao(a, nomeDe(u))}</p>
+        <urbi-wrap>
+          <urbi-kpi rotulo="Data" .valor=${soData(a.data) ?? '—'} formato="texto"></urbi-kpi>
+          <urbi-kpi rotulo="Nº Processo" .valor=${a.numero_processo || '—'} formato="texto"></urbi-kpi>
+          <urbi-kpi rotulo="Valor" .valor=${a.valor === null || a.valor === undefined ? '—' : fmtMoeda(a.valor)} formato="texto"></urbi-kpi>
+        </urbi-wrap>
+        ${a.descricao ? html`<p class="prop-meta">${a.descricao}</p>` : nothing}
+        ${(a.pessoas || []).length > 0
+          ? html`<urbi-wrap>${(a.pessoas || []).map((v) => html`
+              <urbi-badge cor="padrao">${this._nomeDaPessoa(v.pessoa_id)} · ${ROTULO_PAPEL[v.papel as PapelPessoa] ?? v.papel}</urbi-badge>`)}
+            </urbi-wrap>`
+          : nothing}
+        ${(a.imoveis || []).length > 1
+          ? html`<p class="prop-meta">Esta ação alcança ${(a.imoveis || []).length} imóveis.</p>`
+          : nothing}
+        ${this.podeCriar
+          ? html`<div class="barra-acoes">
+              <urbi-botao variante="secundario" pequeno icone="fa-solid fa-pen"
+                @click=${() => this._abrirFormAcao(a)}>Editar</urbi-botao>
+              <urbi-botao variante="perigo" pequeno icone="fa-solid fa-trash"
+                @click=${() => this._acaoDeAcao(() => reg360Api.removerAcao(a.id), 'Ação removida')}>Remover</urbi-botao>
+            </div>`
+          : nothing}
+      </urbi-card>
+    `;
+  }
+
+  private _renderFormAcao(): TemplateResult {
+    const f = this.formAcao!;
+    const set = (nome: string, valor: unknown) => { this.formAcao = { ...f, [nome]: valor }; };
+    const campo = (nome: string, label: string, tipo = 'text') => html`
+      <urbi-input label=${label} tipo=${tipo} .valor=${f[nome] ?? ''}
+        @urbi:input-change=${(e: CustomEvent) => set(nome, e.detail.valor)}></urbi-input>`;
+    const alvo = nomeDe(this.detalhe);
+    return html`
+      <urbi-modal title=${f.editandoId ? 'Editar ação' : 'Registrar ação'}
+        @urbi-modal:close=${() => { this.formAcao = null; }}>
+        <p class="prop-meta">
+          O título é montado do tipo e do polo:
+          <strong>${tituloAcao(f, alvo)}</strong>
+        </p>
+        <div class="form-grid">
+          <urbi-select label="Tipo"
+            .opcoes=${TIPOS_ACAO.map((t) => ({ valor: t, rotulo: ROTULO_TIPO[t as TipoAcao] }))}
+            .valor=${f.tipo}
+            @urbi:select-change=${(e: CustomEvent) => set('tipo', e.detail.valor)}></urbi-select>
+          <urbi-select label="Polo"
+            .opcoes=${POLOS.map((p) => ({ valor: p, rotulo: p === 'up_contra' ? `UP contra ${alvo}` : `${alvo} contra UP` }))}
+            .valor=${f.polo}
+            @urbi:select-change=${(e: CustomEvent) => set('polo', e.detail.valor)}></urbi-select>
+          ${campo('data', 'Data', 'date')}
+          ${campo('numero_processo', 'Nº do processo')}
+          ${campo('valor', 'Valor (R$)', 'number')}
+          <urbi-select label="Situação"
+            .opcoes=${STATUS_ACAO.map((st) => ({ valor: st, rotulo: ROTULO_STATUS[st] }))}
+            .valor=${f.status}
+            @urbi:select-change=${(e: CustomEvent) => set('status', e.detail.valor)}></urbi-select>
+          <urbi-input class="full" label="Descrição" .valor=${f.descricao ?? ''}
+            @urbi:input-change=${(e: CustomEvent) => set('descricao', e.detail.valor)}></urbi-input>
+        </div>
+        ${f.editandoId
+          ? nothing
+          : html`<p class="prop-meta">
+              Este imóvel já entra vinculado. Vincular pessoas e outros imóveis é feito
+              depois de criar — o vínculo com pessoa depende da tela de Moradores (issue #33)
+              para escolher quem.
+            </p>`}
+        <div class="barra-acoes" style="margin-top:16px">
+          <urbi-botao variante="fantasma" @click=${() => { this.formAcao = null; }}>Cancelar</urbi-botao>
+          <urbi-botao variante="primario" ?carregando=${this.carregando}
+            @click=${() => this._salvarFormAcao()}>Salvar</urbi-botao>
+        </div>
+      </urbi-modal>
     `;
   }
 

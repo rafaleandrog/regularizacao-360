@@ -49,6 +49,10 @@ Duas classificações independentes — a **fase** derivada das datas do trâmit
 
 Σ (preço aplicável × área) de **todos** os lotes — potencial, não realizado — e o número diz sobre quantos lotes foi feito. Ver [vgv.md](vgv).
 
+## Ações judiciais
+
+Sobre imóveis **e/ou** pessoas, com o polo (`UP contra` / `contra UP`) guardado como dado e o título montado de uma função só. Ver [acoes.md](acoes).
+
 ## Preços
 
 Precedência: **contrato gravado** → **preço manual** → **proposta vigente** em cascata. O de contrato é imutável de propósito — ver [precos.md](precos).
@@ -56,7 +60,7 @@ Precedência: **contrato gravado** → **preço manual** → **proposta vigente*
 ## Divisão Núcleo × App
 
 - **Núcleo** — entidades transversais consumidas por leitura: `setores_habitacionais`, `parcelamentos`, `incorporacoes`, `imoveis` (lote/gleba/unidade), `matriculas`, `pessoas` (física/jurídica). Escrita apenas em `pessoas` (vincular moradores).
-- **App (`reg360`)** — único dado próprio: a tabela `propostas` (condições comerciais vigentes por período).
+- **App (`reg360`)** — tudo que o Núcleo não tem e não vai ter, porque o monorepo é somente leitura: `propostas` (condições comerciais por período), `parcelamento_dados` (trâmite de regularização), `imovel_dados` (preços e quitação) e as três tabelas de `acoes` (ações judiciais e seus vínculos com imóveis e pessoas).
 
 Sem FK direta para o Núcleo — apenas referência lógica por ID, acessada via `req.nucleo` (backend) e `urbiVerso.nucleo()` (frontend).
 
