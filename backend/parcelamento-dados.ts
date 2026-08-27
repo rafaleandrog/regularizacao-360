@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { soData } from '../comum/cascata.js';
+import { proximaPagina } from '../comum/paginacao.js';
 import {
   faseRegularizacao,
   apenasEditaveisParcelamento,
@@ -18,6 +19,8 @@ import {
 const NUMEROS = ['area_poligonal', 'area_viario', 'area_servidao'] as const;
 const DATAS = ['data_envio_projeto', 'data_aprovacao_conplan', 'data_decreto_gdf'] as const;
 const SITUACOES = new Set(SITUACOES_REGISTRAIS.map((s) => s.id));
+/** Teto de cliente do framework de dados. Pedir mais devolve fatia, sem erro. */
+const POR_PAGINA = 100;
 
 function erro(res: any, status: number, codigo: string, mensagem: string) {
   return res.status(status).json({ erro: true, codigo, mensagem });
@@ -100,11 +103,30 @@ rotasParcelamentoDados.get('/parcelamento-dados', async (req, res) => {
     const filtros: Record<string, unknown> = {};
     if (req.query.parcelamento_id) filtros.parcelamento_id = Number(req.query.parcelamento_id);
 
-    // `varrerTudo` e não `listar`: em rota HTTP o `listar` tem teto de 100 por
-    // página, e pedir mais devolve uma FATIA sem erro. Com 60 parcelamentos
-    // hoje caberia — mas o dia em que não couber, a lista truncaria calada.
-    const dados = await req.dados!.varrerTudo('parcelamento_dados', { filtros });
-    res.json({ dados: (dados || []).map(comFase) });
+    // Pagina em laço em vez de pedir uma página grande: `listar` tem teto de
+    // cliente e devolve uma FATIA sem erro quando se pede mais. Com 60
+    // parcelamentos caberia numa página hoje — mas o dia em que não couber, a
+    // lista truncaria calada, e esse é o defeito que não se vê.
+    //
+    // O verbo `varrerTudo` existe para isto no framework, mas NÃO no SDK
+    // publicado que esta app compila contra (ver CLAUDE.md § piso de
+    // plataforma). Quando o `sdk_min` subir (issue #4), este laço vira uma
+    // linha.
+    //
+    // A resposta do framework de dados tem a mesma forma paginada do Núcleo,
+    // então a decisão de quando parar é a mesma — reusada de comum/paginacao.
+    const acumulado: Record<string, any>[] = [];
+    let pagina: number | null = 1;
+    while (pagina !== null) {
+      const resposta: any = await req.dados!.listar('parcelamento_dados', {
+        filtros,
+        pagina,
+        por_pagina: POR_PAGINA,
+      });
+      acumulado.push(...(resposta?.dados || []));
+      pagina = proximaPagina(resposta, pagina, acumulado.length);
+    }
+    res.json({ dados: acumulado.map(comFase) });
   } catch (err: any) {
     erro(res, 500, 'REG360_LISTAR_FALHOU', err?.message || 'Falha ao listar dados de regularização');
   }
