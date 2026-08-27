@@ -22,12 +22,19 @@ npm run registrar     # regenera apps.json (o shell descobre a app)
 ## Checklist de ativação (admin da instância)
 
 1. **Registrar e subir** a app (build + `registrar` + restart do shell).
-2. **Habilitar flags de Núcleo** em `Admin → Apps → reg360 → Núcleo` (começam desligadas):
-   - `pessoas`: ler, escrever
-   - `imoveis`: ler, escrever, remover
-   - `parcelamentos`: ler, escrever
-   - `matriculas`: ler, escrever
-   - `setores_habitacionais`: ler · `incorporacoes`: ler
+2. **Habilitar flags de Núcleo** em `Admin → Apps → reg360 → Núcleo` (começam desligadas). Quem liga é quem tem a alçada `nucleo`, ou o sysadmin pleno.
+
+   Cada flag pedida tem pelo menos um chamador no código — o manifesto não pede nada "por precaução", porque pedido a mais vira toggle que alguém liga sem saber por quê:
+
+   | Entidade | Flags | Quem exige |
+   |---|---|---|
+   | `setores_habitacionais` | `ler` | home e detalhe do Setor; busca de setor pelo importador |
+   | `parcelamentos` | `ler`, `escrever` | navegação lê; o importador cria parcelamento por slug |
+   | `imoveis` | `ler`, `escrever` | listagem de lotes e unidades lê; o importador cria lote. **Lote e unidade são subtipos** — a flag se pede no supertipo `imoveis`, nunca em `lotes`/`unidades` |
+   | `matriculas` | `ler`, `escrever` | o importador cria matrícula por número |
+   | `pessoas` | `ler`, `escrever` | o importador cria pessoa física por CPF |
+
+   Sem a flag ligada, o endpoint responde `403 NUCLEO_FLAG_DESLIGADA` — sintoma de admin que não ligou o toggle, não de bug da app. `403 NUCLEO_FLAG_NAO_PEDIDA` é o outro caso: o manifesto não declarou, e aí é bug da app.
 3. **Confirmar permissão padrão** do app = `leitura` (todos consultam).
 4. **Atribuir papéis** em `Configurações → Usuários`: `criador`, `validador_interno`, `editor_regularizacao` aos usuários certos.
 5. **Rotina** `checar_propostas_vencendo` — conferir em `Config → Rotinas` (frequência diária; horário no fuso da organização; toggle ativa; "Rodar agora" para testar).

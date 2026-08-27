@@ -27,15 +27,13 @@
     "imoveis",
     "setores_habitacionais",
     "parcelamentos",
-    "incorporacoes",
     "matriculas"
   ],
   "permissoes_nucleo": {
     "pessoas": ["ler", "escrever"],
-    "imoveis": ["ler", "escrever", "remover"],
+    "imoveis": ["ler", "escrever"],
     "setores_habitacionais": ["ler"],
     "parcelamentos": ["ler", "escrever"],
-    "incorporacoes": ["ler"],
     "matriculas": ["ler", "escrever"]
   },
   "eventos": {
