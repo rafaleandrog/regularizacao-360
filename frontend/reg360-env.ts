@@ -20,6 +20,20 @@ export interface UrbiContexto {
   nivel?: string;
 }
 
+/**
+ * Erro que `urbiVerso.api`/`nucleo` lançam em resposta não-2xx. O shell já
+ * normaliza os vários envelopes de erro em `requisitarApi` e entrega
+ * `message` + `status` + `codigo` — a app lê, não reparseia o corpo.
+ *
+ * Espelho manual, como o resto deste arquivo. Alinhar com os tipos do SDK
+ * quando a issue #4 (piso de SDK) destravar.
+ */
+export interface ErroApi extends Error {
+  status?: number;
+  codigo?: string;
+  detalhes?: unknown;
+}
+
 export interface UrbiVersoGlobal {
   usuario(): UrbiUsuario | null;
   contexto(): UrbiContexto | null;
