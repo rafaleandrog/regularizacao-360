@@ -45,10 +45,20 @@ npm run registrar     # regenera apps.json (o shell descobre a app)
 
 O app está preparado para a Transação, mas ela **ainda não existe no Núcleo**. Enquanto isso: aba Transações desabilitada, rotas de transação em `501`, KPI de VGV com placeholder. Quando o módulo existir, declarar `transacoes` em `dependencias_nucleo`/`permissoes_nucleo`, habilitar as flags e ativar as rotas de proxy.
 
+## As duas tabelas 1:1 e a corrida do upsert
+
+`parcelamento_dados` (um registro por parcelamento) e `imovel_dados` (um por imóvel) **nascem na primeira escrita** — a maioria dos objetos do Núcleo nunca foi editada e não tem linha nenhuma aqui. Toda gravação nelas é, portanto, um upsert por chave natural.
+
+O padrão ingênuo — `listar`, e então `criar` ou `atualizar` — tem uma janela, e **envolvê-lo numa transação não a fecha**: um `SELECT` comum não trava linha que ainda não existe, então duas requisições simultâneas podem as duas não achar nada e as duas tentarem inserir. A segunda espera no índice único e falha com violação; o usuário vê um erro de banco em vez de ver o seu dado salvo.
+
+Por isso as duas rotas passam por `upsertPorChave` (`backend/upsert.ts`), que **assume a corrida**: perder o INSERT é resposta esperada, não erro. Quem perde relê e atualiza o registro que o concorrente acabou de criar — uma tentativa só de recuperação, porque se a segunda leitura também não achar nada, o erro é outro e precisa subir.
+
+Quem adicionar uma terceira tabela 1:1 com o Núcleo usa a mesma função, em vez de repetir o laço.
+
 ## Testes
 
 ```bash
-node --test apps/reg360/backend/__tests__/cascata.test.ts
+pnpm test          # node --import tsx/esm --test backend/__tests__/*.test.ts
 ```
 
-Cobrem a lógica pura de vigência e cascata (`comum/cascata.ts`). A verificação end-to-end (rotas, render, criação no Núcleo) exige o shell rodando contra Postgres.
+Cobrem a lógica pura de `comum/` (vigência e cascata, paginação, busca, preço, agregados, regularização) e o `upsertPorChave` do backend, com um helper de dados falso que simula o índice único. A verificação end-to-end (rotas de verdade, render, leitura do Núcleo) exige o shell rodando contra Postgres.

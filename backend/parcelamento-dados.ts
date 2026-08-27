@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { soData } from '../comum/cascata.js';
 import { proximaPagina } from '../comum/paginacao.js';
+import { upsertPorChave } from './upsert.js';
 import {
   faseRegularizacao,
   apenasEditaveisParcelamento,
@@ -150,17 +151,13 @@ rotasParcelamentoDados.put('/parcelamento-dados/:parcelamentoId', async (req, re
     const dados = preparado as Record<string, unknown>;
     dados.atualizado_por_id = req.contexto?.usuario?.id ?? null;
 
-    // Upsert numa transação: o registro nasce na primeira edição, e duas
-    // requisições simultâneas não podem criar dois registros para o mesmo
-    // parcelamento (há único em `parcelamento_id`).
-    const salvo = await req.dados!.transaction(async (trx) => {
-      const { dados: existentes } = await trx.listar('parcelamento_dados', {
-        filtros: { parcelamento_id: parcelamentoId },
-        por_pagina: 1,
-      });
-      const atual = existentes?.[0];
-      if (atual) return trx.atualizar('parcelamento_dados', Number(atual.id), dados);
-      return trx.criar('parcelamento_dados', { ...dados, parcelamento_id: parcelamentoId });
+    // O registro nasce na primeira edição. `upsertPorChave` trata a corrida:
+    // transação sozinha NÃO fecha a janela, porque SELECT não trava linha
+    // inexistente — ver o comentário em `backend/upsert.ts`.
+    const salvo = await upsertPorChave(req.dados!, {
+      tabela: 'parcelamento_dados',
+      chave: { parcelamento_id: parcelamentoId },
+      dados,
     });
 
     if (!salvo) {

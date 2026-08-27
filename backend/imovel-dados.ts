@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { proximaPagina } from '../comum/paginacao.js';
+import { upsertPorChave } from './upsert.js';
 
 /**
  * Rotas de `imovel_dados` — dados que a UP mantém por imóvel e que não existem
@@ -61,18 +62,15 @@ async function buscarDados(req: any, imovelId: number, imovelTipo: string) {
 }
 
 /**
- * Upsert em transação — o registro nasce na primeira escrita, e há único em
- * `(imovel_id, imovel_tipo)`.
+ * O registro nasce na primeira escrita. A corrida no único
+ * `(imovel_id, imovel_tipo)` é tratada em `backend/upsert.ts` — transação
+ * sozinha não a fecha.
  */
 async function salvar(req: any, imovelId: number, imovelTipo: string, campos: Record<string, unknown>) {
-  return req.dados!.transaction(async (trx: any) => {
-    const { dados } = await trx.listar('imovel_dados', {
-      filtros: { imovel_id: imovelId, imovel_tipo: imovelTipo },
-      por_pagina: 1,
-    });
-    const atual = dados?.[0];
-    if (atual) return trx.atualizar('imovel_dados', Number(atual.id), campos);
-    return trx.criar('imovel_dados', { ...campos, imovel_id: imovelId, imovel_tipo: imovelTipo });
+  return upsertPorChave(req.dados!, {
+    tabela: 'imovel_dados',
+    chave: { imovel_id: imovelId, imovel_tipo: imovelTipo },
+    dados: campos,
   });
 }
 
