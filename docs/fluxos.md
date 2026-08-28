@@ -16,7 +16,9 @@ tipo:
 
 Admin da app faz bypass de todos. Permissão padrão: `leitura` — todos consultam, inclusive as Ações, porque quem enxerga o lote precisa saber que há litígio sobre ele.
 
-**O gate da tela e o da API são o mesmo.** Botão que aparece e toma `403` é defeito: quem não tem o papel não vê o controle.
+**O gate da tela e o da API leem os mesmos campos**: `rolesApp` e `nivelApp`, e nada mais. Botão que aparece e toma `403` é defeito — mas o inverso também é: botão escondido de quem tinha permissão.
+
+A tela já divergiu nos dois sentidos, por aceitar também `roles`/`nivel` (sem sufixo). O caso mais traiçoeiro era `ctx.roles || ctx.rolesApp`: **array vazio é truthy em JS**, então `roles: []` vencia um `rolesApp` preenchido e escondia o controle. Os campos sem sufixo saíram do tipo, para ninguém alcançá-los de novo.
 
 ## Fluxo 1 — Criar e aprovar proposta
 
@@ -58,7 +60,9 @@ A aba **Transações** no lote não tem botão morto — ela explica o que falta
 
 As páginas de detalhe mostram KPIs (`urbi-kpi`) com contagens, áreas e o preço vigente resolvido por cascata.
 
-**O VGV existe e é calculado** — `Σ (preço aplicável × area_efetiva)`, potencial e não realizado, agregado no cliente porque `req.nucleo` não lê no backend. Ele não depende de Transação, e não mostra placeholder: enquanto as bases não estão em memória, diz que está calculando, e **nunca** exibe `R$ 0` sobre base vazia. Ver [vgv.md](vgv).
+**O VGV existe e é calculado** — `Σ (preço aplicável × area_efetiva)`, potencial e não realizado, agregado no cliente porque `req.nucleo` não lê no backend. Ele não depende de Transação.
+
+Enquanto as bases de preço e proposta não estão em memória, **nenhuma tela mostra número**: o card da lista e o painel do detalhe dizem que está calculando, ou que a base não carregou. Zero sobre base vazia é indistinguível de zero de verdade, e é a primeira coisa que o usuário vê. Ver [vgv.md](vgv).
 
 ## Quando a Transação existir
 

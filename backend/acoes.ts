@@ -488,6 +488,21 @@ async function desvincular(req: any, res: any, tabela: string) {
     if (!vinculo || Number(vinculo.acao_id) !== acaoId) {
       return erro(res, 404, 'REG360_NAO_ENCONTRADO', 'Vínculo não encontrado nesta ação');
     }
+
+    // A regra "ao menos um vínculo" era checada SÓ na criação, e desvincular
+    // podia levar o último — deixando uma ação sem imóvel nem pessoa, que não
+    // aparece em tela nenhuma. Invariante que só vale na criação não é
+    // invariante: é uma checagem que a operação seguinte desfaz.
+    const [imoveis, pessoas] = await Promise.all([
+      varrer(req, 'acao_imoveis', { acao_id: acaoId }),
+      varrer(req, 'acao_pessoas', { acao_id: acaoId }),
+    ]);
+    if (imoveis.length + pessoas.length <= 1) {
+      return erro(res, 409, 'REG360_ULTIMO_VINCULO',
+        'Este é o único vínculo da ação, e ação sem imóvel nem pessoa fica invisível. '
+        + 'Vincule outro antes, ou remova a ação inteira.');
+    }
+
     await req.dados!.deletar(tabela, vinculoId);
     res.json({ removido: true, id: vinculoId });
   } catch (err: any) {
