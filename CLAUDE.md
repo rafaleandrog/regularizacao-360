@@ -61,6 +61,8 @@ Isso vale para **cada verbo que você chama**, não só para o número do piso. 
 
 ## Três restrições do Núcleo que decidem o desenho das telas
 
+> **Datadas de 2026-08, e com prazo de validade** — o Núcleo da Pinguim vai ser atualizado. Ver a seção seguinte antes de assumir que ainda valem.
+
 Detalhadas em [`docs/leitura-nucleo.md`](docs/leitura-nucleo.md). Em resumo:
 
 1. **`req.nucleo` não lê.** Só `batch`, `chamarSubrecurso`, `atualizar` e `buscarPorChave`. Toda agregação é no **frontend**.
@@ -70,6 +72,27 @@ Detalhadas em [`docs/leitura-nucleo.md`](docs/leitura-nucleo.md). Em resumo:
 **O objeto de navegação é o Lote, não a Unidade.** No Núcleo, `unidades.incorporacao_id` é NOT NULL: unidade só existe sob incorporação. A premissa da spec v0.9 de que "todo lote gera 1 unidade default" nunca virou realidade.
 
 **Não reimplemente o que o Núcleo entrega pronto**: `id_legivel`, `cpf_formatado`, `telefone_formatado`, `area_efetiva`, status derivado. Remontar cria uma segunda verdade que diverge.
+
+## O Núcleo da Pinguim vai ser atualizado — releia isto antes de continuar
+
+**O Ricardo vai atualizar o Núcleo da instância intermediária.** Depois disso, várias decisões deste app deixam de ser contorno e viram escolha — mas só depois de **conferir**, não de supor.
+
+Boa parte do desenho atual existe para driblar limitações do Núcleo que valiam em 2026-08. Se elas caírem, o contorno vira dívida. Confira estas cinco antes de tocar em qualquer coisa:
+
+| O que conferir | Se mudou, revisita |
+|---|---|
+| `uso` e `tipo_lote` chegaram no payload do **Lote**? | #22 destrava, e **#19, #20 e #21 precisam ser reescritas**: hoje elas mandam criar coluna em `imovel_dados`, o que passaria a ser segunda fonte da verdade. O app deve **ler do lote** |
+| Existe rota de **pessoa → imóveis**? | A tela de Moradores foi desenhada inteira em volta da ausência dela: recorte escolhido pelo usuário, e três estados de situação em vez de dois. Ver `docs/moradores.md` |
+| `GET /pessoas` expande **contatos** na listagem? | Cai a requisição por linha para telefone e email |
+| `parcelamentos.setor_habitacional_id` e `lotes.parcelamento_id` estão **preenchidos**? | É a #13. Se estiverem nulos, a navegação não anda e a Onda 1 vira importação antes de tela |
+| A entidade **Transação** existe? | O adaptador está pronto: liga-se o interruptor. Roteiro em `docs/transacao-integracao.md` |
+
+**Duas coisas que NÃO relaxam com a atualização:**
+
+1. **A referência continua sendo o SDK publicado**, não o `main` do monorepo nem o que a Pinguim roda. Instância atualizada não significa SDK cunhado — e usar verbo que só existe no `main` já derrubou o CI aqui (o `varrerTudo` do PR #48).
+2. **Filtro fora da allowlist continua sendo ignorado em silêncio** até prova em contrário. O importador só é seguro porque confere o que voltou (`casaComChave`); não tire essa guarda porque "agora o Núcleo é novo".
+
+O que fica esperando essa atualização: **#40** (release, instalação e QA — a skill `qa` precisa das variáveis `URBIVERSO_QA_*` no ambiente da sessão) e as issues da tabela acima.
 
 ## Escopo
 
