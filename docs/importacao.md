@@ -99,7 +99,9 @@ URBI_BASE=https://homolog.urbiverso.com.br URBI_TOKEN=<token> \
   node scripts/importar-planilhao.mjs planilhao.csv --executar
 ```
 
-O modo seguro é o que se obtém **por engano**: rodar sem flag nenhuma não escreve. `--simular` é aceito como sinônimo, porque é como a issue #38 nomeia o modo.
+O modo seguro é o que se obtém **por engano**: rodar sem flag nenhuma não escreve.
+
+`--simular` é aceito e **vence `--executar`**. Aceitar a flag sem lhe dar efeito seria pior que não aceitá-la: quem escreve `--executar --simular` está pedindo para não gravar, e um script que ignorasse o segundo argumento escreveria 6 mil linhas na base viva. Em conflito, o modo seguro ganha.
 
 **Sempre na instância intermediária** (Pinguim), nunca na de desenvolvimento — ver [operacao.md](operacao).
 

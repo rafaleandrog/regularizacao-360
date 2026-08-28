@@ -64,7 +64,18 @@ export const ENDPOINTS = {
 const BASE = process.env.URBI_BASE || 'http://localhost:3000';
 const TOKEN = process.env.URBI_TOKEN || '';
 const APP = 'reg360';
-const EXECUTAR = process.argv.includes('--executar');
+/**
+ * `--simular` VENCE `--executar`.
+ *
+ * A issue #38 nomeia o modo seguro de `--simular`, e este script já o tem como
+ * padrão. Mas aceitar a flag sem lhe dar efeito seria pior que não aceitá-la:
+ * quem escreve `--executar --simular` está pedindo para não gravar, e um script
+ * que ignorasse o segundo argumento escreveria 6 mil linhas na base viva.
+ *
+ * Em conflito, o modo seguro ganha — sempre.
+ */
+const SIMULAR = process.argv.includes('--simular');
+const EXECUTAR = process.argv.includes('--executar') && !SIMULAR;
 
 // ---------------------------------------------------------------------------
 // Utilidades puras (exportadas para teste)
@@ -524,7 +535,9 @@ async function main() {
   const fs = await import('node:fs/promises');
   const linhas = parseCsv(await fs.readFile(caminho, 'utf-8'));
 
+  const conflito = SIMULAR && process.argv.includes('--executar');
   console.log(`Modo: ${EXECUTAR ? 'EXECUTAR (escreve)' : 'SIMULAÇÃO (nada é escrito)'}`);
+  if (conflito) console.log('  (--simular e --executar juntos: o modo seguro venceu)');
   console.log(`Base: ${BASE}`);
 
   const rel = novoRelatorio();
