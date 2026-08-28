@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { proximaPagina, lerPaginacao } from '../comum/paginacao.js';
+import { lerPaginacao } from '../comum/paginacao.js';
 import { mapaComLimite } from '../comum/concorrencia.js';
 import {
   apenasEditaveisAcao,
@@ -44,13 +44,45 @@ function podeEscrever(req: any): boolean {
 /**
  * Ordem única da listagem de ações, aplicada nos DOIS caminhos.
  *
- * A rota pagina de dois jeitos — no banco quando não há filtro de vínculo, em
- * memória quando há —, e ordem que muda conforme o filtro aplicado é o tipo de
- * inconsistência que o usuário nota e ninguém consegue reproduzir.
+ * **Por `id`, e não por `data`.** Ordenar só por `data` não define a ordem
+ * entre empates — e empate é comum aqui, porque `data` é opcional e várias
+ * ações podem ficar `null`. Com `LIMIT`/`OFFSET` diferentes, o banco pode
+ * devolver as empatadas em posições distintas, e aí páginas **repetem ou
+ * omitem** registros sem erro nenhum. `id` é único, então a ordem é total.
+ *
+ * O custo é que a lista fica por ordem de CADASTRO, não pela data do processo:
+ * uma ação registrada hoje com data de 2020 aparece no topo. É um preço barato
+ * — cada card mostra a sua data — perto de uma paginação que perde linhas.
+ *
+ * Ordem composta (`data DESC, id DESC`) seria o ideal, mas o `ordenar` do SDK
+ * publicado recebe uma coluna, e inventar sintaxe aqui é chute.
  */
-const ORDEM_ACOES = { ordenar: 'data', ordem: 'desc' } as const;
+const ORDEM_ACOES = { ordenar: 'id', ordem: 'desc' } as const;
 
-/** Varre uma tabela do app inteira, paginando — `listar` devolve fatia. */
+/**
+ * Teto da varredura de uma tabela DO APP.
+ *
+ * `proximaPagina` traz o teto de 200 páginas do Núcleo, que é guarda contra
+ * laço infinito e não limite de negócio. Reusá-lo aqui truncaria em silêncio um
+ * conjunto legítimo, e `total`/`paginas` passariam a mentir. Por isso a
+ * varredura tem teto próprio — e, ao batê-lo, **falha** em vez de devolver
+ * resposta parcial com cara de completa.
+ */
+const TETO_VARREDURA = 50_000;
+
+class VarreduraGrandeDemais extends Error {
+  constructor(public tabela: string) {
+    super(`A consulta alcança mais de ${TETO_VARREDURA} registros em ${tabela}. `
+      + 'Estreite o filtro — devolver uma parte como se fosse o todo seria pior.');
+  }
+}
+
+/**
+ * Varre uma tabela do app inteira, paginando — `listar` devolve fatia.
+ *
+ * Não usa `proximaPagina`: os sinais de parada dela são os do Núcleo, e o teto
+ * de páginas embutido pararia a varredura fingindo fim de conjunto.
+ */
 async function varrer(
   req: any,
   tabela: string,
@@ -58,15 +90,25 @@ async function varrer(
   ordem: Record<string, unknown> = {},
 ) {
   const acumulado: Record<string, any>[] = [];
-  let pagina: number | null = 1;
-  while (pagina !== null) {
+  let pagina = 1;
+  for (;;) {
     const resposta: any = await req.dados!.listar(tabela, {
       filtros, ...ordem, pagina, por_pagina: POR_PAGINA,
     });
-    acumulado.push(...(resposta?.dados || []));
-    pagina = proximaPagina(resposta, pagina, acumulado.length);
+    const linhas: any[] = resposta?.dados || [];
+    acumulado.push(...linhas);
+
+    if (linhas.length === 0) return acumulado;
+    const total = Number(resposta?.total);
+    if (Number.isFinite(total) && acumulado.length >= total) return acumulado;
+    const paginas = Number(resposta?.paginas);
+    if (Number.isFinite(paginas) && pagina >= paginas) return acumulado;
+    // Sem `total` nem `paginas`, a última página é a incompleta.
+    if (linhas.length < POR_PAGINA) return acumulado;
+
+    if (acumulado.length >= TETO_VARREDURA) throw new VarreduraGrandeDemais(tabela);
+    pagina += 1;
   }
-  return acumulado;
 }
 
 /**
@@ -172,6 +214,23 @@ function prepararCorpo(body: any, { exigirObrigatorios }: { exigirObrigatorios: 
   return dados;
 }
 
+/**
+ * Envelope único da listagem.
+ *
+ * Os três caminhos (banco, filtrado por vínculo, vazio) passam por aqui: sem
+ * isso o mesmo cliente recebe formatos diferentes ao acrescentar ou tirar um
+ * filtro, e `por_pagina` some quando o framework não o ecoa.
+ */
+function resposta(dados: any[], total: number, pagina: number, porPagina: number) {
+  return {
+    dados,
+    total,
+    pagina,
+    por_pagina: porPagina,
+    paginas: Math.max(1, Math.ceil(total / porPagina)),
+  };
+}
+
 export const rotasAcoes: ReturnType<typeof Router> = Router();
 
 // GET /api/reg360/acoes — listar, com filtros
@@ -211,7 +270,7 @@ rotasAcoes.get('/acoes', async (req, res) => {
     }
 
     if (idsPorVinculo !== null && idsPorVinculo.size === 0) {
-      return res.json({ dados: [], total: 0, pagina, por_pagina: porPagina, paginas: 1 });
+      return res.json(resposta([], 0, pagina, porPagina));
     }
 
     // SEM filtro de vínculo, a paginação é do banco: pedir a página e pronto.
@@ -222,9 +281,16 @@ rotasAcoes.get('/acoes', async (req, res) => {
       const r: any = await req.dados!.listar('acoes', {
         filtros, ...ORDEM_ACOES, pagina, por_pagina: porPagina,
       });
-      const linhas = r?.dados || [];
+      const linhas: any[] = r?.dados || [];
       const { imoveis, pessoas } = await vinculosDe(req, linhas);
-      return res.json({ ...r, dados: linhas.map((a: any) => comVinculos(a, imoveis, pessoas)) });
+      // `total` do banco, quando ele o dá; senão o que veio nesta página é o
+      // que se sabe. Nunca `r.por_pagina` cru: o framework não garante ecoá-lo,
+      // e o mesmo cliente receberia formatos diferentes ao pôr ou tirar um
+      // filtro de vínculo.
+      const total = Number.isFinite(Number(r?.total)) ? Number(r.total) : linhas.length;
+      return res.json(resposta(
+        linhas.map((a) => comVinculos(a, imoveis, pessoas)), total, pagina, porPagina,
+      ));
     }
 
     const todas = await varrer(req, 'acoes', filtros, ORDEM_ACOES);
@@ -234,17 +300,15 @@ rotasAcoes.get('/acoes', async (req, res) => {
     const fatia = filtradas.slice(inicio, inicio + porPagina);
     const { imoveis, pessoas } = await vinculosDe(req, fatia);
 
-    // Paginação calculada aqui, e não ecoada do banco: a fatia saiu de um
-    // filtro que o banco não aplicou, então `total` e `paginas` dele contariam
-    // as ações que o vínculo excluiu.
-    res.json({
-      dados: fatia.map((a) => comVinculos(a, imoveis, pessoas)),
-      total: filtradas.length,
-      pagina,
-      por_pagina: porPagina,
-      paginas: Math.max(1, Math.ceil(filtradas.length / porPagina)),
-    });
+    // `total` daqui, não do banco: a fatia saiu de um filtro que o banco não
+    // aplicou, então o `total` dele contaria as ações que o vínculo excluiu.
+    res.json(resposta(
+      fatia.map((a) => comVinculos(a, imoveis, pessoas)), filtradas.length, pagina, porPagina,
+    ));
   } catch (err: any) {
+    if (err instanceof VarreduraGrandeDemais) {
+      return erro(res, 413, 'REG360_CONSULTA_GRANDE_DEMAIS', err.message);
+    }
     erro(res, 500, 'REG360_LISTAR_FALHOU', err?.message || 'Falha ao listar ações');
   }
 });
