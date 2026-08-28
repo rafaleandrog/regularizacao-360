@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { rotasParcelamentoDados } from './parcelamento-dados.js';
 import { rotasImovelDados } from './imovel-dados.js';
 import { rotasAcoes } from './acoes.js';
+import { rotasTransacoes } from './transacoes.js';
 import {
   hoje,
   amanha,
@@ -46,6 +47,9 @@ const POR_PAGINA_MAX = 100;
 rotas.use(rotasParcelamentoDados);
 rotas.use(rotasImovelDados);
 rotas.use(rotasAcoes);
+// Transação vive num adaptador próprio: quando a entidade existir no Núcleo, é
+// lá que ela liga, e nenhuma tela muda. Ver `comum/transacoes-contrato.ts`.
+rotas.use(rotasTransacoes);
 
 // ---------------------------------------------------------------------------
 // Autorização
@@ -336,23 +340,6 @@ rotas.post('/propostas/:id/copiar', async (req, res) => {
     erro(res, 422, 'REG360_COPIAR_FALHOU', err?.message || 'Falha ao copiar proposta');
   }
 });
-
-// ---------------------------------------------------------------------------
-// Transações (preparadas; dependem do módulo Transação no Núcleo).
-// Enquanto a entidade não existir no Núcleo, retornam 501 (RN-09).
-// ---------------------------------------------------------------------------
-
-function transacaoIndisponivel(res: any) {
-  return erro(
-    res,
-    501,
-    'REG360_TRANSACAO_INDISPONIVEL',
-    'Transações estarão disponíveis quando a entidade Transação existir no Núcleo.',
-  );
-}
-
-rotas.post('/transacoes', (_req, res) => transacaoIndisponivel(res));
-rotas.post('/transacoes/:id/aprovar', (_req, res) => transacaoIndisponivel(res));
 
 // ---------------------------------------------------------------------------
 // Rotinas — o shell descobre `export const rotinas` e agenda conforme o manifesto

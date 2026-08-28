@@ -17,6 +17,16 @@ import {
 import { soData, hoje, statusVigencia, type StatusVigencia } from '../comum/cascata.js';
 import { lerQuitacao } from '../comum/quitacao.js';
 import {
+  transacaoDisponivel,
+  transacoesDoImovel,
+  linhasDeAssinatura,
+  badgeTransacao,
+  MENSAGEM_INDISPONIVEL,
+  garantirEstado,
+  linhasDaTabela,
+  type Transacao,
+} from './transacoes.js';
+import {
   situacaoCadastro,
   indexarPorPessoa,
   vinculosConhecidos,
@@ -248,6 +258,12 @@ export class AppReg360 extends LitElement {
   @state() private lotesQueFalharam = 0;
 
   /** Ações do imóvel aberto, com os vínculos que a rota já devolve junto. */
+  /**
+   * Transações do imóvel. Vazia enquanto a entidade não existir no Núcleo — e o
+   * adaptador é quem sabe disso, não a tela.
+   */
+  @state() private transacoes: Transacao[] = [];
+
   @state() private acoes: Acao[] = [];
   @state() private carregandoAcoes = false;
   @state() private buscaAcaoPessoa = '';
@@ -374,6 +390,7 @@ export class AppReg360 extends LitElement {
             if (ehLote) this.pessoasPorLote = new Map([[this.rota.id, await reg360Api.pessoasDoLote(this.rota.id)]]);
             void this._carregarMatriculas();
             void this._carregarAcoes();
+            void this._carregarTransacoes();
             // O contexto vem ANTES da cascata: sem o parcelamento resolvido não
             // se sabe o setor, e o elo de Setor da cadeia seria pulado — a
             // unidade não herdaria o preço-base que sempre existe lá.
@@ -712,6 +729,23 @@ export class AppReg360 extends LitElement {
       this._registrarFalha(e, 'Falha ao carregar as ações');
     } finally {
       this.carregandoAcoes = false;
+    }
+  }
+
+  /**
+   * Transações do imóvel, pelo adaptador. Ele devolve lista vazia quando a
+   * entidade não existe, então não há caminho de erro a tratar aqui.
+   */
+  private async _carregarTransacoes() {
+    this.transacoes = [];
+    if (!this.rota.id) return;
+    try {
+      // O estado vem do servidor, não da constante compilada: ligar a
+      // integração no backend precisa valer para bundle já em cache.
+      await garantirEstado();
+      this.transacoes = await transacoesDoImovel(this.rota.view, this.rota.id);
+    } catch (e: any) {
+      this._registrarFalha(e, 'Falha ao carregar as transações');
     }
   }
 
@@ -1542,6 +1576,10 @@ export class AppReg360 extends LitElement {
           const b = badgeAcao(a);
           return html`<urbi-badge cor=${b.cor}>${b.rotulo}</urbi-badge>`;
         })}
+        ${(() => {
+          const b = badgeTransacao(this.transacoes);
+          return b ? html`<urbi-badge cor=${b.cor}>${b.rotulo}</urbi-badge>` : nothing;
+        })()}
         ${this._quitacao.quitado
           ? html`<urbi-badge cor="sucesso">Quitado${this._quitacao.em ? ` em ${soData(this._quitacao.em)}` : ''}${this._quitacao.porNome ? ` · ${this._quitacao.porNome}` : ''}</urbi-badge>`
           : nothing}
@@ -1579,15 +1617,15 @@ export class AppReg360 extends LitElement {
       <urbi-abas
         .abas=${[
           { id: 'propostas', label: 'Propostas Vigentes' },
-          { id: 'transacoes', label: 'Transações', dot: 'aviso' },
+          { id: 'transacoes', label: 'Transações',
+            ...(transacaoDisponivel() ? {} : { dot: 'aviso' }) },
           { id: 'acoes', label: 'Ações', ...(this._acoesEmDestaque.length > 0 ? { dot: 'aviso' } : {}) },
         ]}
         ativa=${this.abaDetalhe}
         @urbi:aba-selecionar=${(e: CustomEvent) => { this.abaDetalhe = e.detail.id; }}
       ></urbi-abas>
       ${this.abaDetalhe === 'transacoes'
-        ? html`<urbi-estado-vazio icone="fa-solid fa-clock" mensagem="Transações em breve"
-            submensagem="A entidade Transação ainda não existe no Núcleo. Ver issue #36."></urbi-estado-vazio>`
+        ? this._renderTransacoes()
         : this.abaDetalhe === 'acoes'
           ? this._renderAcoes(u)
           : this._renderPropostasVigentes(this.rota.view, u.id)}
@@ -2031,6 +2069,43 @@ export class AppReg360 extends LitElement {
             @click=${() => this._salvarFormAcao()}>Salvar</urbi-botao>
         </div>
       </urbi-modal>
+    `;
+  }
+
+  /**
+   * Aba de Transações.
+   *
+   * Indisponível **não** é botão desabilitado: botão morto faz o usuário achar
+   * que é falta de permissão dele. A tela diz o que falta, e diz onde o valor
+   * combinado está sendo guardado enquanto isso.
+   *
+   * As três linhas de assinatura aparecem com `—` mesmo sem fonte. Esconder as
+   * linhas faria o campo sumir sem explicação — e é justamente a lista que a
+   * tela já sabe montar no dia da virada.
+   */
+  private _renderTransacoes(): TemplateResult {
+    const linhas = linhasDeAssinatura(this.transacoes);
+    return html`
+      ${transacaoDisponivel()
+        ? nothing
+        : html`<urbi-banner variante="alerta">${MENSAGEM_INDISPONIVEL}</urbi-banner>`}
+      <p class="secao-titulo">Datas de assinatura</p>
+      <urbi-wrap>
+        ${linhas.map((l) => html`
+          <urbi-kpi rotulo=${l.rotulo} .valor=${l.data ? soData(l.data) : '—'} formato="texto"></urbi-kpi>`)}
+      </urbi-wrap>
+      ${this.transacoes.length === 0
+        ? html`<urbi-estado-vazio icone="fa-solid fa-file-signature"
+            mensagem=${transacaoDisponivel() ? 'Nenhuma transação neste imóvel' : 'Transações ainda não existem no Núcleo'}
+            submensagem=${transacaoDisponivel() ? '' : 'A tela já sabe montar: quando a entidade existir, ela aparece aqui sem mudança de código.'}></urbi-estado-vazio>`
+        : html`<urbi-tabela
+            .colunas=${[
+              { id: 'tipo', label: 'Tipo', valor: (t: any) => t.tipo },
+              { id: 'data', label: 'Assinatura', valor: (t: any) => soData(t.data) ?? '—' },
+              { id: 'valor', label: 'Valor', alinhamento: 'direita', valor: (t: any) => t.valor == null ? '—' : fmtMoeda(t.valor) },
+            ]}
+            .linhas=${linhasDaTabela(this.transacoes)}
+          ></urbi-tabela>`}
     `;
   }
 

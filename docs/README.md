@@ -74,7 +74,7 @@ Sem FK direta para o Núcleo — apenas referência lógica por ID, acessada via
 
 ## Transação (dependência futura do Núcleo)
 
-A entidade Transação ainda não está disponível no Núcleo. O app é construído preparado para ela: as rotas de proxy retornam `501/503` e a UI de "Criar Transação" fica desabilitada até o módulo existir. KPIs de VGV exibem placeholder nesse intervalo.
+A entidade Transação ainda não existe no Núcleo. O app está preparado para ela num **adaptador de três arquivos**, com um interruptor único (`DISPONIVEL`): as derivações de data de assinatura e de estágio já estão escritas e testadas com dados sintéticos, e a aba do lote explica o que falta em vez de mostrar botão morto. O roteiro do dia da virada — inclusive o que **não** fazer com o `preco_estatico` — está em [transacao-integracao.md](transacao-integracao).
 
 ## Estado atual
 
