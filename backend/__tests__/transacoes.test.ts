@@ -9,6 +9,7 @@ import {
   badgeTransacao,
   DISPONIVEL,
   TIPOS_TRANSACAO,
+  NIVEL_ESTAGIO,
 } from '../../comum/transacoes-contrato.js';
 
 // Dados sintéticos do contrato — a entidade não existe no Núcleo, e a derivação
@@ -67,16 +68,31 @@ describe('tipoMaisAvancado — avanço é pela ordem do negócio, não pela data
   });
 
   test('cessão registrada depois NÃO faz o imóvel regredir da escritura', () => {
-    // Cessão é o último da lista, então ela AVANÇA sobre escritura — o que o
-    // teste trava é que a ordem do negócio manda, não a data.
+    // Ceder posição contratual transfere QUEM está no contrato; não avança o
+    // imóvel. Um imóvel escriturado continua escriturado.
     assert.equal(tipoMaisAvancado([
       t('escritura', '2024-01-01'),
       t('cessao', '2026-01-01'),
-    ]), 'cessao');
+    ]), 'escritura');
+  });
+
+  test('cessão fica acima de pré-contrato e de CP — ela pressupõe um contrato', () => {
     assert.equal(tipoMaisAvancado([
       t('cessao', '2020-01-01'),
       t('pre_contrato', '2026-01-01'),
     ]), 'cessao');
+    assert.equal(tipoMaisAvancado([
+      t('promessa_compra_venda', '2026-01-01'),
+      t('cessao', '2020-01-01'),
+    ]), 'cessao');
+  });
+
+  test('tipo desconhecido é ignorado, não vira nível undefined', () => {
+    assert.equal(tipoMaisAvancado([t('usucapiao' as any, '2026-01-01')]), null);
+    assert.equal(tipoMaisAvancado([
+      t('usucapiao' as any, '2026-01-01'),
+      t('pre_contrato', '2020-01-01'),
+    ]), 'pre_contrato');
   });
 
   test('só conta transação efetiva', () => {
@@ -101,8 +117,16 @@ describe('o interruptor', () => {
   test('DISPONIVEL é falso — a entidade não existe no Núcleo', () => {
     assert.equal(DISPONIVEL, false);
   });
-  test('a ordem dos tipos é a do negócio, e é dela que sai o avanço', () => {
-    assert.deepEqual([...TIPOS_TRANSACAO],
-      ['pre_contrato', 'promessa_compra_venda', 'escritura', 'cessao']);
+  test('o avanço sai de um mapa explícito, NÃO da ordem do array', () => {
+    // Derivar da posição no array acopla a regra à ordem de escrita de uma
+    // constante: reordenar por estética mudaria o badge de todo imóvel, calado.
+    assert.equal(NIVEL_ESTAGIO.escritura > NIVEL_ESTAGIO.cessao, true,
+      'escritura é o topo — é o fim da regularização');
+    assert.equal(NIVEL_ESTAGIO.cessao > NIVEL_ESTAGIO.promessa_compra_venda, true);
+    assert.equal(NIVEL_ESTAGIO.promessa_compra_venda > NIVEL_ESTAGIO.pre_contrato, true);
+    // Todo tipo do catálogo tem nível: tipo sem nível seria ignorado em silêncio.
+    for (const tipo of TIPOS_TRANSACAO) {
+      assert.equal(typeof NIVEL_ESTAGIO[tipo], 'number', `${tipo} sem nível`);
+    }
   });
 });

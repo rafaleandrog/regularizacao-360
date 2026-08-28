@@ -24,8 +24,38 @@ export type { Transacao, TipoTransacao };
 /** Mensagem única do estado indisponível — a tela não a reescreve. */
 export const MENSAGEM_INDISPONIVEL = INDISPONIVEL.mensagem;
 
+/**
+ * Estado efetivo, que pode divergir do compilado.
+ *
+ * `DISPONIVEL` é o padrão de build; o servidor é a autoridade. Sem consultá-lo,
+ * ligar a integração no backend não teria efeito nenhum em cliente com bundle
+ * antigo em cache — e a rota `/transacoes-estado` seria enfeite, já que nada a
+ * chamaria.
+ */
+let estadoEfetivo: boolean = DISPONIVEL;
+let consulta: Promise<boolean> | null = null;
+
+/**
+ * Pergunta ao servidor uma vez por sessão e memoriza.
+ *
+ * Falha de rede **não** liga nem desliga nada: mantém o que já se sabia. Tratar
+ * erro como "indisponível" faria uma queda momentânea esconder a aba inteira.
+ */
+export function garantirEstado(): Promise<boolean> {
+  if (!consulta) {
+    consulta = urbiVerso.api('/transacoes-estado')
+      .then((r: any) => {
+        estadoEfetivo = Boolean(r?.disponivel);
+        return estadoEfetivo;
+      })
+      .catch(() => estadoEfetivo);
+  }
+  return consulta;
+}
+
+/** Leitura síncrona, para o render. Reflete a última consulta bem-sucedida. */
 export function transacaoDisponivel(): boolean {
-  return DISPONIVEL;
+  return estadoEfetivo;
 }
 
 /**
@@ -39,7 +69,8 @@ export async function transacoesDoImovel(
   imovelTipo: string,
   imovelId: number,
 ): Promise<Transacao[]> {
-  if (!DISPONIVEL) return [];
+  // O servidor decide, não a constante compilada.
+  if (!(await garantirEstado())) return [];
   const r: any = await urbiVerso.api(
     `/transacoes?imovel_tipo=${encodeURIComponent(imovelTipo)}&imovel_id=${imovelId}`,
   );

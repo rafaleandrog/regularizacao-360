@@ -22,6 +22,7 @@ import {
   linhasDeAssinatura,
   badgeTransacao,
   MENSAGEM_INDISPONIVEL,
+  garantirEstado,
   linhasDaTabela,
   type Transacao,
 } from './transacoes.js';
@@ -739,6 +740,9 @@ export class AppReg360 extends LitElement {
     this.transacoes = [];
     if (!this.rota.id) return;
     try {
+      // O estado vem do servidor, não da constante compilada: ligar a
+      // integração no backend precisa valer para bundle já em cache.
+      await garantirEstado();
       this.transacoes = await transacoesDoImovel(this.rota.view, this.rota.id);
     } catch (e: any) {
       this._registrarFalha(e, 'Falha ao carregar as transações');

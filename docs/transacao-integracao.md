@@ -30,12 +30,18 @@ Um `grep -i transac` fora desses três não deve achar lógica de negócio. Se a
 2. **Ligar o toggle** na instância, em `Admin → Apps → reg360 → Núcleo`. Quem liga precisa da alçada `nucleo`.
 3. **Implementar os três handlers** de `backend/transacoes.ts`, que hoje lançam se forem alcançados com o interruptor ligado. Isso é deliberado: adaptador ligado sem implementação deve **quebrar alto**, não devolver vazio silencioso.
 4. **Ligar a leitura do frontend** em `transacoesDoImovel`, que hoje devolve `[]`.
+
+   O frontend **pergunta ao servidor** (`GET /transacoes-estado`) uma vez por sessão e memoriza: `DISPONIVEL` é só o padrão de build. Sem isso, ligar a integração no backend não teria efeito em cliente com bundle antigo em cache. Falha de rede mantém o que já se sabia — tratá-la como "indisponível" faria uma queda momentânea esconder a aba inteira.
 5. **Trocar `DISPONIVEL` para `true`.**
 6. Conferir que a aba do lote mostra as transações, que as três datas de assinatura preenchem e que o badge de estágio aparece no cabeçalho — tudo isso **já está escrito e testado** com dados sintéticos.
 
 ## Duas decisões de derivação que valem ler antes de mexer
 
-**O estágio é o tipo mais avançado, não o mais recente.** Uma cessão registrada hoje sobre um imóvel que já tem escritura não faz o imóvel regredir. O avanço segue a ordem de `TIPOS_TRANSACAO`, e é por isso que essa lista é ordenada — reordená-la muda o comportamento em silêncio.
+**O estágio é o tipo mais avançado, não o mais recente**, e o avanço sai de `NIVEL_ESTAGIO` — um **mapa explícito**, não a posição num array. Derivar da ordem de escrita de uma constante acoplaria a regra à estética: reordenar a lista mudaria o badge de todo imóvel, em silêncio.
+
+`escritura` é o topo, porque é o fim da regularização. **`cessao` fica abaixo dela**: ceder posição contratual transfere *quem* está no contrato, não avança o imóvel — uma cessão registrada depois não pode fazer um imóvel já escriturado regredir. E fica acima de `promessa_compra_venda`, porque uma cessão pressupõe um contrato existente para ceder.
+
+**Isso é premissa, não certeza.** Se a UP tratar cessão como estágio próprio, o número muda em `NIVEL_ESTAGIO` e em nenhum outro lugar.
 
 **Cancelada não conta em lugar nenhum.** Nem nas datas de assinatura, nem no estágio. Mostrar a data de uma transação cancelada diria que o imóvel caminhou onde ele voltou.
 

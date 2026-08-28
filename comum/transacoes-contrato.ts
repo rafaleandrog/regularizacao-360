@@ -13,20 +13,38 @@
 /** O interruptor. Enquanto for `false`, o app diz o que falta em vez de errar. */
 export const DISPONIVEL = false;
 
-/**
- * Os quatro tipos do negócio, na ordem em que a regularização caminha.
- *
- * A ordem importa: o "estágio" do imóvel é o tipo mais avançado que ele
- * alcançou, e derivar isso de uma lista desordenada daria resposta errada.
- */
+/** Os quatro tipos do negócio. É catálogo — a ordem daqui não significa nada. */
 export const TIPOS_TRANSACAO = [
   'pre_contrato',
   'promessa_compra_venda',
-  'escritura',
   'cessao',
+  'escritura',
 ] as const;
 
 export type TipoTransacao = (typeof TIPOS_TRANSACAO)[number];
+
+/**
+ * Quão avançado é cada tipo. **Mapa explícito, não posição numa lista.**
+ *
+ * Derivar o estágio da ordem do array acopla uma regra de negócio à ordem de
+ * escrita de uma constante: reordenar por estética mudaria o badge de todo
+ * imóvel, em silêncio. Aqui a regra tem nome e valor.
+ *
+ * `escritura` é o topo — é o fim da regularização. **`cessao` fica abaixo
+ * dela**: ceder posição contratual transfere quem está no contrato, não avança
+ * o imóvel, e uma cessão registrada depois não pode fazer um imóvel já
+ * escriturado regredir. Fica acima de `promessa_compra_venda` porque uma cessão
+ * pressupõe um contrato existente para ceder.
+ *
+ * **Isto é premissa, não certeza.** Se a UP tratar cessão como estágio próprio,
+ * o número muda aqui e em nenhum outro lugar.
+ */
+export const NIVEL_ESTAGIO: Record<TipoTransacao, number> = {
+  pre_contrato: 1,
+  promessa_compra_venda: 2,
+  cessao: 3,
+  escritura: 4,
+};
 
 export const ROTULO_TIPO_TRANSACAO: Record<TipoTransacao, string> = {
   pre_contrato: 'Pré-Contrato',
@@ -138,18 +156,23 @@ export function datasDeAssinatura(
  * O estágio do imóvel: o tipo **mais avançado** que ele alcançou.
  *
  * Não é "a transação mais recente por data" — uma cessão registrada hoje sobre
- * um imóvel que já tem escritura não faz o imóvel regredir. O avanço é pela
- * ordem do negócio, e é por isso que `TIPOS_TRANSACAO` é ordenada.
+ * um imóvel que já tem escritura não faz o imóvel regredir. O avanço sai de
+ * `NIVEL_ESTAGIO`, que é mapa explícito justamente para essa regra não depender
+ * da ordem em que alguém escreveu uma constante.
  */
 export function tipoMaisAvancado(transacoes: any[]): TipoTransacao | null {
   let melhor: TipoTransacao | null = null;
-  let melhorIndice = -1;
+  let melhorNivel = 0;
   for (const t of transacoes || []) {
     if (!efetiva(t)) continue;
-    const i = TIPOS_TRANSACAO.indexOf(t?.tipo);
-    if (i > melhorIndice) {
-      melhorIndice = i;
-      melhor = TIPOS_TRANSACAO[i];
+    const tipo = t?.tipo as TipoTransacao;
+    const nivel = NIVEL_ESTAGIO[tipo];
+    // Tipo desconhecido não tem nível e é ignorado, em vez de virar `undefined`
+    // numa comparação — que seria sempre falsa e esconderia o problema.
+    if (typeof nivel !== 'number') continue;
+    if (nivel > melhorNivel) {
+      melhorNivel = nivel;
+      melhor = tipo;
     }
   }
   return melhor;

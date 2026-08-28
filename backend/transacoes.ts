@@ -26,9 +26,18 @@ function indisponivel(res: any) {
  * corpo de cada handler é escrito — e este guard sai de uma vez só.
  */
 function comAdaptador(handler: (req: any, res: any) => unknown) {
-  return (req: any, res: any) => {
+  // `next` é obrigatório aqui: no Express 4 uma promessa rejeitada devolvida
+  // pelo handler NÃO chega ao middleware de erro. Quando o adaptador ligar e
+  // uma chamada ao Núcleo falhar, a requisição ficaria sem resposta e a
+  // rejeição sem tratamento — o pior desfecho possível, porque não erra nem
+  // responde.
+  return (req: any, res: any, next: any) => {
     if (!DISPONIVEL) return indisponivel(res);
-    return handler(req, res);
+    try {
+      return Promise.resolve(handler(req, res)).catch(next);
+    } catch (err) {
+      return next(err);
+    }
   };
 }
 
