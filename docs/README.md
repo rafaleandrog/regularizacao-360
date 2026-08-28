@@ -15,8 +15,9 @@ A UP opera a regularização de condomínios informais na Fazenda Paranoazinho. 
 O app centraliza tudo no UrbiVerso, com:
 
 - Navegação hierárquica: Setor Habitacional → Parcelamento → **Lote** (dados do Núcleo)
-- Gestão de propostas comerciais com resolução em cascata (Setor → Parcelamento → Unidade)
-- Dashboard de KPIs (áreas, contagens; VGV quando Transação existir no Núcleo)
+- Gestão de propostas comerciais com resolução em cascata nos **quatro** níveis (Setor → Parcelamento → Lote → Unidade)
+- KPIs de área, contagem e **VGV** — que é calculado hoje, e não depende da Transação
+- Regularização do parcelamento, ações judiciais, moradores e quitação
 - Fluxo de aprovação de propostas com roles (`criador`, `validador_interno`, `editor_regularizacao`)
 
 ## Como o app lê o Núcleo
@@ -34,6 +35,8 @@ Toda leitura passa por `frontend/nucleo-cliente.ts`, que pagina em laço, memori
 | `/parcelamentos/fase/:fase` | A mesma lista, filtrada por fase de regularização |
 | `/parcelamento/:id` | Detalhe do Parcelamento — KPIs, abas Lotes e Propostas |
 | `/lote/:id` | Detalhe do Lote |
+| `/moradores` | Lista de Moradores, com busca de servidor |
+| `/morador/:id` | Detalhe do Morador |
 | `/unidade/:id` | Detalhe da Unidade (só onde há incorporação) |
 | `/proposta/:id` | Detalhe da Proposta |
 
@@ -65,9 +68,15 @@ Marca, não cálculo — o app registra que alguém constatou, com autoria e dat
 
 Precedência: **contrato gravado** → **preço manual** → **proposta vigente** em cascata. O de contrato é imutável de propósito — ver [precos.md](precos).
 
+## Modelo de dados
+
+As seis tabelas do schema `reg360` e **por que cada uma existe fora do Núcleo** estão em [modelo-dados.md](modelo-dados). A pergunta que ele responde é sempre a mesma: por que este campo não está lá?
+
 ## Divisão Núcleo × App
 
-- **Núcleo** — entidades transversais consumidas por leitura: `setores_habitacionais`, `parcelamentos`, `incorporacoes`, `imoveis` (lote/gleba/unidade), `matriculas`, `pessoas` (física/jurídica). Escrita apenas em `pessoas` (vincular moradores).
+- **Núcleo** — entidades transversais, consumidas sobretudo por **leitura**: `setores_habitacionais`, `parcelamentos`, `incorporacoes`, `imoveis` (lote/gleba/unidade), `matriculas`, `pessoas` (física/jurídica).
+
+  O app **escreve** em quatro delas, e em contextos estreitos: `pessoas` (cadastrar morador — a única escrita das telas), e `imoveis`, `parcelamentos` e `matriculas`, que só o importador do Planilhão usa. As flags e quem as liga estão em [operacao.md](operacao).
 - **App (`reg360`)** — tudo que o Núcleo não tem e não vai ter, porque o monorepo é somente leitura: `propostas` (condições comerciais por período), `parcelamento_dados` (trâmite de regularização), `imovel_dados` (preços e quitação) e as três tabelas de `acoes` (ações judiciais e seus vínculos com imóveis e pessoas).
 
 Sem FK direta para o Núcleo — apenas referência lógica por ID, acessada via `req.nucleo` (backend) e `urbiVerso.nucleo()` (frontend).
@@ -78,4 +87,15 @@ A entidade Transação ainda não existe no Núcleo. O app está preparado para 
 
 ## Estado atual
 
-**Fase 0 — scaffold.** Estrutura do app, manifesto, roles e navegação declarados; backend com endpoint de sanidade (`GET /ping`); frontend placeholder. As próximas fases adicionam `schema.json` (propostas), rotas de negócio + cascata, eventos + rotina de vencimento, e a UI territorial com componentes `urbi-*`.
+O app está **completo em código** e ainda **não instalado numa instância**. Navegação territorial, propostas em quatro níveis com cascata, preços, VGV, regularização do parcelamento, ações judiciais, moradores e quitação: tudo escrito, testado e documentado.
+
+Falta o que depende de coisas fora daqui:
+
+| Pendência | Depende de |
+|---|---|
+| Catálogo de **Uso** e **Tipo de Lote** | Definição do negócio — e o destino é o objeto Lote do Núcleo, não uma tabela daqui |
+| **Transação** | A entidade existir no Núcleo. O adaptador está pronto, com interruptor único |
+| **Release e QA** na instância intermediária | Instalação na Pinguim |
+| `pnpm-lock.yaml` e piso de `sdk_min` | PAT com `read:packages` |
+
+**Este doc é a fonte da verdade.** A spec v0.9 foi aposentada para [`historico/spec-v0.9.md`](historico/spec-v0.9) — ela registra as decisões e as datas, mas boa parte dela não descreve o app que existe.

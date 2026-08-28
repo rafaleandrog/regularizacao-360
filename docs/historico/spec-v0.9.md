@@ -1,3 +1,17 @@
+---
+titulo: Spec v0.9 (histórico)
+descricao: A especificação original do reg360, preservada como registro das decisões e datas. NÃO é contrato — o modelo atual está em docs/.
+tipo: historico
+---
+
+> ## ⚠️ Documento histórico — não é contrato
+>
+> Esta é a spec **v0.9**, escrita antes da implementação. Boa parte dela **não descreve o app que existe**: o modelo de Transação do §2.5 não é o do Núcleo, a premissa de que todo lote gera uma unidade default nunca virou realidade, e as permissões de Núcleo listadas não batem com o `manifesto.json`.
+>
+> Ela fica aqui porque registra **as decisões e as datas** — apagá-la perderia o porquê de escolhas que ainda valem.
+>
+> **O modelo atual está em [`docs/`](../README.md).** Spec desatualizada tratada como contrato já custou caro nesta plataforma; se algo aqui contradiz `docs/`, `docs/` vence.
+
 # Regularização 360 — Spec v0.9
 
 > Sistema de gestão do ciclo de vida da regularização fundiária da UP, desde o cadastro territorial até a escrituração de unidades.
