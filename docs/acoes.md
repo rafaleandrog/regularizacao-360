@@ -43,6 +43,17 @@ Criar a partir do lote já vem com o lote vinculado — a tela não pede ao usu�
 
 Remover é soft delete, e leva os vínculos junto: vínculo órfão apontando para ação removida reapareceria em qualquer contagem por imóvel ou por pessoa.
 
+## Duas paginações, uma ordem
+
+`GET /acoes` pagina de dois jeitos, e a diferença é imposta pelo framework: ele **não faz junção entre tabelas do app**, e o filtro por imóvel ou por pessoa mora na tabela de vínculo.
+
+- **Sem filtro de vínculo** → a paginação é do banco. Pede-se a página e pronto.
+- **Com filtro de vínculo** → acham-se os `acao_id` no vínculo, varre-se `acoes`, filtra-se e fatia-se em memória. Aí `total` e `paginas` são **calculados aqui**, não ecoados do banco: os do banco contariam as ações que o vínculo excluiu.
+
+Os dois caminhos usam a **mesma ordem** (`ORDEM_ACOES`). Ordem que muda conforme o filtro aplicado é o tipo de inconsistência que o usuário nota e ninguém consegue reproduzir.
+
+Buscar os vínculos de uma página tem o mesmo dilema — o framework não filtra por lista de ids. Até 10 ações vale uma requisição por ação, em janela de 6 simultâneos (`comum/concorrencia.ts`); acima disso, uma varredura só sai mais barata que a enxurrada. O detalhe de **uma** ação sempre filtra por `acao_id`, que é o índice da tabela.
+
 ## Filtro por imóvel exige os dois campos
 
 `imovel_id` sozinho é `400`. Sem o tipo, o filtro devolveria as ações do **lote 5 e da unidade 5** — objetos diferentes com o mesmo número. Filtro pela metade é pior que filtro ausente: o resultado tem cara de certo.

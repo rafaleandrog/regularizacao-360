@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { proximaPagina, lerPaginacao } from '../comum/paginacao.js';
+import { mapaComLimite } from '../comum/concorrencia.js';
 import {
   apenasEditaveisAcao,
   lerVinculosImovel,
@@ -28,6 +29,8 @@ import {
  */
 
 const POR_PAGINA = 100;
+/** Simultâneos ao buscar vínculos ação a ação — mesma razão de `comum/concorrencia.ts`. */
+const JANELA_VINCULOS = 6;
 
 function erro(res: any, status: number, codigo: string, mensagem: string) {
   return res.status(status).json({ erro: true, codigo, mensagem });
@@ -38,38 +41,78 @@ function podeEscrever(req: any): boolean {
   return ctx?.nivelApp === 'admin' || (ctx?.rolesApp || []).includes('criador');
 }
 
+/**
+ * Ordem única da listagem de ações, aplicada nos DOIS caminhos.
+ *
+ * A rota pagina de dois jeitos — no banco quando não há filtro de vínculo, em
+ * memória quando há —, e ordem que muda conforme o filtro aplicado é o tipo de
+ * inconsistência que o usuário nota e ninguém consegue reproduzir.
+ */
+const ORDEM_ACOES = { ordenar: 'data', ordem: 'desc' } as const;
+
 /** Varre uma tabela do app inteira, paginando — `listar` devolve fatia. */
-async function varrer(req: any, tabela: string, filtros: Record<string, unknown>) {
+async function varrer(
+  req: any,
+  tabela: string,
+  filtros: Record<string, unknown>,
+  ordem: Record<string, unknown> = {},
+) {
   const acumulado: Record<string, any>[] = [];
   let pagina: number | null = 1;
   while (pagina !== null) {
-    const resposta: any = await req.dados!.listar(tabela, { filtros, pagina, por_pagina: POR_PAGINA });
+    const resposta: any = await req.dados!.listar(tabela, {
+      filtros, ...ordem, pagina, por_pagina: POR_PAGINA,
+    });
     acumulado.push(...(resposta?.dados || []));
     pagina = proximaPagina(resposta, pagina, acumulado.length);
   }
   return acumulado;
 }
 
-/** Vínculos de uma lista de ações, num par de varreduras — não uma por ação. */
+/**
+ * Vínculos de uma lista de ações.
+ *
+ * O framework de dados **não filtra por lista de ids**, então buscar os
+ * vínculos de N ações é um dilema entre N requisições e uma varredura da
+ * tabela. A escolha depende de N, e é por isso que ela é feita aqui e não
+ * fixada de um jeito só:
+ *
+ * - **uma ação** (o detalhe, e o retorno de criar/editar) → filtro por
+ *   `acao_id`, que é o índice da tabela. Varrer as duas tabelas inteiras para
+ *   montar UMA ação é o desperdício óbvio, e era o que esta função fazia.
+ * - **poucas ações** → uma requisição por ação, em janela de simultâneos.
+ * - **muitas ações** → uma varredura só, e o filtro em memória: aí a varredura
+ *   custa menos que a enxurrada de requisições.
+ */
+const ACOES_ATE_QUE_VALE_UMA_A_UMA = 10;
+
 async function vinculosDe(req: any, acoes: any[]) {
-  if (acoes.length === 0) return { imoveis: new Map(), pessoas: new Map() };
-  const [imoveis, pessoas] = await Promise.all([
-    varrer(req, 'acao_imoveis', {}),
-    varrer(req, 'acao_pessoas', {}),
-  ]);
-  const ids = new Set(acoes.map((a) => Number(a.id)));
-  const porAcao = <T extends { acao_id: unknown }>(lista: T[]) => {
-    const m = new Map<number, T[]>();
+  if (acoes.length === 0) return { imoveis: new Map<number, any[]>(), pessoas: new Map<number, any[]>() };
+
+  const ids = acoes.map((a) => Number(a.id));
+  const buscar = async (tabela: string) => {
+    if (ids.length <= ACOES_ATE_QUE_VALE_UMA_A_UMA) {
+      const porLote = await mapaComLimite(ids, JANELA_VINCULOS, (id) =>
+        varrer(req, tabela, { acao_id: id }));
+      return porLote.flat();
+    }
+    return varrer(req, tabela, {});
+  };
+
+  const [imoveis, pessoas] = await Promise.all([buscar('acao_imoveis'), buscar('acao_pessoas')]);
+  const conhecidos = new Set(ids);
+  const porAcao = (lista: any[]) => {
+    const m = new Map<number, any[]>();
     for (const v of lista) {
       const id = Number(v.acao_id);
-      if (!ids.has(id)) continue;
+      if (!conhecidos.has(id)) continue;
       const atual = m.get(id);
       if (atual) atual.push(v);
       else m.set(id, [v]);
     }
     return m;
   };
-  return { imoveis: porAcao(imoveis as any[]), pessoas: porAcao(pessoas as any[]) };
+  return { imoveis: porAcao(imoveis), pessoas: porAcao(pessoas) };
 }
 
 function comVinculos(acao: any, imoveis: Map<number, any[]>, pessoas: Map<number, any[]>) {
@@ -168,18 +211,32 @@ rotasAcoes.get('/acoes', async (req, res) => {
     }
 
     if (idsPorVinculo !== null && idsPorVinculo.size === 0) {
-      return res.json({ dados: [], total: 0, pagina: 1, paginas: 1 });
+      return res.json({ dados: [], total: 0, pagina, por_pagina: porPagina, paginas: 1 });
     }
 
-    const todas = await varrer(req, 'acoes', filtros);
-    const filtradas = idsPorVinculo === null
-      ? todas
-      : todas.filter((a) => idsPorVinculo!.has(Number(a.id)));
+    // SEM filtro de vínculo, a paginação é do banco: pedir a página e pronto.
+    // A varredura só existe porque o filtro de vínculo mora noutra tabela e o
+    // framework não faz junção — usá-la sempre faria toda listagem carregar a
+    // tabela inteira para devolver 100 linhas.
+    if (idsPorVinculo === null) {
+      const r: any = await req.dados!.listar('acoes', {
+        filtros, ...ORDEM_ACOES, pagina, por_pagina: porPagina,
+      });
+      const linhas = r?.dados || [];
+      const { imoveis, pessoas } = await vinculosDe(req, linhas);
+      return res.json({ ...r, dados: linhas.map((a: any) => comVinculos(a, imoveis, pessoas)) });
+    }
+
+    const todas = await varrer(req, 'acoes', filtros, ORDEM_ACOES);
+    const filtradas = todas.filter((a) => idsPorVinculo!.has(Number(a.id)));
 
     const inicio = (pagina - 1) * porPagina;
     const fatia = filtradas.slice(inicio, inicio + porPagina);
     const { imoveis, pessoas } = await vinculosDe(req, fatia);
 
+    // Paginação calculada aqui, e não ecoada do banco: a fatia saiu de um
+    // filtro que o banco não aplicou, então `total` e `paginas` dele contariam
+    // as ações que o vínculo excluiu.
     res.json({
       dados: fatia.map((a) => comVinculos(a, imoveis, pessoas)),
       total: filtradas.length,
