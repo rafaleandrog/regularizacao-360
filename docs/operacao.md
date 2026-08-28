@@ -43,7 +43,11 @@ npm run registrar     # regenera apps.json (o shell descobre a app)
 
 ## Dependência externa — Transação
 
-O app está preparado para a Transação, mas ela **ainda não existe no Núcleo**. Enquanto isso: aba Transações desabilitada, rotas de transação em `501`, KPI de VGV com placeholder. Quando o módulo existir, declarar `transacoes` em `dependencias_nucleo`/`permissoes_nucleo`, habilitar as flags e ativar as rotas de proxy.
+A entidade **ainda não existe no Núcleo**, e o app está preparado num adaptador de três arquivos com interruptor único. A aba Transações explica o que falta em vez de mostrar botão morto; as rotas respondem `501` com código semântico.
+
+**O VGV não depende disso** — ele é calculado e aparece hoje. (Este doc afirmava o contrário até o PR #58; a afirmação vinha do desenho original, em que o VGV sairia de contratos assinados.)
+
+O roteiro do dia da virada — o que ligar, em que ordem, e o que **não** fazer com o `preco_estatico` — está em [transacao-integracao.md](transacao-integracao).
 
 ## As duas tabelas 1:1 e a corrida do upsert
 
