@@ -49,6 +49,39 @@ export interface Proposta {
   lote_grande_m2?: number | null;
 }
 
+export interface Acao {
+  id: number;
+  tipo: 'revisional' | 'obrigacao_de_fazer' | 'outra';
+  polo: 'up_contra' | 'contra_up';
+  data?: string | null;
+  numero_processo?: string | null;
+  valor?: number | null;
+  descricao?: string | null;
+  status: 'ativa' | 'encerrada' | 'suspensa';
+  criado_por_id?: number | null;
+  criador_nome?: string | null;
+  /** Vínculos, que a rota devolve junto — a tela nunca os busca à parte. */
+  imoveis?: Array<{ id: number; imovel_id: number; imovel_tipo: string }>;
+  pessoas?: Array<{ id: number; pessoa_id: number; papel: string }>;
+}
+
+/**
+ * Corpo de criação: os vínculos vão JUNTO, e é por isso que ele não é um
+ * `Partial<Acao>` — na `Acao` que volta, cada vínculo já tem o seu próprio
+ * `id`; aqui ainda não existe nenhum.
+ */
+export interface NovaAcao {
+  tipo: string;
+  polo: string;
+  data?: string | null;
+  numero_processo?: string | null;
+  valor?: number | null;
+  descricao?: string | null;
+  status?: string;
+  imoveis?: Array<{ imovel_id: number; imovel_tipo: string }>;
+  pessoas?: Array<{ pessoa_id: number; papel?: string }>;
+}
+
 export interface ListaDados<T> {
   dados: T[];
   total?: number;
@@ -99,6 +132,34 @@ export const reg360Api = {
     urbiVerso.api(`/imovel-dados/${tipo}/${id}/preco-estatico/corrigir`, JSON_POST({ preco_estatico: preco })),
   salvarPrecoManual: (tipo: string, id: number, preco: number | null): Promise<any> =>
     urbiVerso.api(`/imovel-dados/${tipo}/${id}/preco-manual`, JSON_POST({ preco_m2_manual: preco }, 'PUT')),
+
+  // ---- Ações judiciais (tabelas do app) ----
+  // Filtro por imóvel exige os DOIS campos: `imovel_id` sozinho devolveria as
+  // ações do lote 5 E da unidade 5 — objetos diferentes com o mesmo número.
+  listarAcoes: (p?: {
+    imovel_id?: number;
+    imovel_tipo?: string;
+    pessoa_id?: number;
+    tipo?: string;
+    polo?: string;
+    status?: string;
+  }): Promise<ListaDados<Acao>> => urbiVerso.api(`/acoes${qs(p as any)}`),
+  buscarAcao: (id: number): Promise<Acao> => urbiVerso.api(`/acoes/${id}`),
+  criarAcao: (corpo: NovaAcao): Promise<Acao> => urbiVerso.api('/acoes', JSON_POST(corpo)),
+  // Editar aceita o mesmo formato de criar, sem os vínculos — a edição mexe nos
+  // campos da ação; vínculo entra e sai pelas rotas próprias.
+  editarAcao: (id: number, corpo: Omit<NovaAcao, 'imoveis' | 'pessoas'>): Promise<Acao> =>
+    urbiVerso.api(`/acoes/${id}`, JSON_POST(corpo, 'PATCH')),
+  removerAcao: (id: number): Promise<any> =>
+    urbiVerso.api(`/acoes/${id}/remover`, JSON_POST(undefined)),
+  vincularPessoaNaAcao: (id: number, pessoaId: number, papel: string): Promise<any> =>
+    urbiVerso.api(`/acoes/${id}/pessoas`, JSON_POST({ pessoa_id: pessoaId, papel })),
+  desvincularPessoaDaAcao: (id: number, vinculoId: number): Promise<any> =>
+    urbiVerso.api(`/acoes/${id}/pessoas/${vinculoId}/remover`, JSON_POST(undefined)),
+  vincularImovelNaAcao: (id: number, imovelId: number, imovelTipo: string): Promise<any> =>
+    urbiVerso.api(`/acoes/${id}/imoveis`, JSON_POST({ imovel_id: imovelId, imovel_tipo: imovelTipo })),
+  desvincularImovelDaAcao: (id: number, vinculoId: number): Promise<any> =>
+    urbiVerso.api(`/acoes/${id}/imoveis/${vinculoId}/remover`, JSON_POST(undefined)),
 
   // ---- Dados de regularização do Parcelamento (tabela do app) ----
   listarParcelamentoDados: (): Promise<ListaDados<any>> => urbiVerso.api('/parcelamento-dados'),
