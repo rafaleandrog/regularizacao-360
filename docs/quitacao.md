@@ -50,3 +50,7 @@ Marca irreversível vira dado errado permanente no primeiro clique por engano �
 Sem filtro, a flag não teria uso prático nenhum. Os chips **Todos / Quitados / Não quitados** usam a mesma base que o VGV já carrega (`imovel_dados` por imóvel), então não custam requisição nova — mas dependem dela: enquanto a base não chegou, a tela diz que está carregando em vez de filtrar sobre o vazio.
 
 Lote **sem registro** conta como não quitado. É o caso normal: a maioria dos imóveis nunca foi editada.
+
+**Base ausente não filtra.** Com `precosPorImovel` vazio, "Quitados" devolveria lista vazia e "Não quitados" devolveria tudo — incluindo os quitados. Aviso na tela não conserta resultado errado na tabela: ele só explica um número que continua mentindo. Enquanto a base não chegou, o filtro fica **sem efeito** e a tela diz isso; se a carga falhou, diz que falhou.
+
+E trocar o filtro dispara a carga dos ocupantes da nova página. Filtrar traz lotes que não estavam visíveis, e sem isso a coluna Pessoas deles ficaria em `…` para sempre — e `…` significa "ainda não sei", o que viraria mentira permanente.

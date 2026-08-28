@@ -866,10 +866,16 @@ export class AppReg360 extends LitElement {
   private get _lotesFiltrados(): any[] {
     const porQuitacao = (lista: any[]) => {
       if (this.filtroQuitacao === 'todos') return lista;
+      // Base ausente NÃO filtra. Com `precosPorImovel` vazio, "Quitados"
+      // devolveria lista vazia e "Não quitados" devolveria tudo — incluindo os
+      // quitados. Aviso na tela não conserta resultado errado na tabela: ele só
+      // explica um número que continua mentindo. Enquanto a base não chegou, o
+      // filtro fica sem efeito, e a tela diz isso.
+      if (!this.basesDoVgvCarregadas) return lista;
       const querQuitado = this.filtroQuitacao === 'quitados';
-      // O dado de quitação vem da tabela do app, indexada por (tipo, id) — a
-      // mesma base que o VGV já carrega. Lote sem registro é não quitado, que
-      // é o caso normal e não "desconhecido".
+      // O dado vem da tabela do app, indexada por (tipo, id) — a mesma base que
+      // o VGV carrega. Lote sem registro é não quitado, que é o caso normal e
+      // não "desconhecido".
       return lista.filter((l) => {
         const d = this.precosPorImovel.get(chaveImovel(l?.id, 'lote'));
         return Boolean(d?.quitado) === querQuitado;
@@ -1440,18 +1446,32 @@ export class AppReg360 extends LitElement {
           @urbi:chip-atalho:click=${(e: CustomEvent) => {
             this.filtroQuitacao = e.detail.id;
             this.paginaLotes = 1;
+            // O filtro traz para a página 1 lotes que não estavam visíveis, e
+            // os ocupantes deles nunca foram buscados. Sem isto a coluna
+            // Pessoas fica em `…` para sempre — e `…` significa "ainda não
+            // sei", então seria mentira permanente.
+            void this._carregarPessoasDaPagina();
           }}
         ></urbi-chips-atalho>
       </urbi-wrap>
       ${this.filtroQuitacao !== 'todos' && !this.basesDoVgvCarregadas
         ? html`<p class="prop-meta">
-            Carregando os dados de quitação — o filtro usa a mesma base do VGV.
+            ${this.carregandoVgv
+              ? 'Carregando os dados de quitação — o filtro ainda não está valendo.'
+              : 'Os dados de quitação não carregaram, então este filtro está sem efeito: a lista abaixo é a completa.'}
           </p>`
         : nothing}
       <urbi-input
         label=${this.modoBusca === 'morador' ? 'Nome do morador' : 'Endereço (quadra, conjunto, rua, lote)'}
         .valor=${this.termoBusca}
-        @urbi:input-change=${(e: CustomEvent) => { this.termoBusca = String(e.detail.valor ?? ''); this.paginaLotes = 1; }}
+        @urbi:input-change=${(e: CustomEvent) => {
+          this.termoBusca = String(e.detail.valor ?? '');
+          this.paginaLotes = 1;
+          // Mesma razão do chip de quitação: filtrar traz lotes novos para a
+          // página 1, e sem isto a coluna Pessoas deles ficaria em `…` para
+          // sempre. Defeito que já existia antes deste PR.
+          void this._carregarPessoasDaPagina();
+        }}
       ></urbi-input>
       ${this.modoBusca === 'morador' && this.carregandoPessoas
         ? html`<p class="prop-meta">Carregando ocupantes do parcelamento…</p>`
