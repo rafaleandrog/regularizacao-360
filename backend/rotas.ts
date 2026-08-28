@@ -7,6 +7,7 @@ import { rotasParcelamentoDados } from './parcelamento-dados.js';
 import { rotasImovelDados } from './imovel-dados.js';
 import { rotasAcoes } from './acoes.js';
 import { rotasTransacoes } from './transacoes.js';
+import { rotasMoradores } from './moradores.js';
 import {
   hoje,
   amanha,
@@ -50,6 +51,9 @@ rotas.use(rotasAcoes);
 // Transação vive num adaptador próprio: quando a entidade existir no Núcleo, é
 // lá que ela liga, e nenhuma tela muda. Ver `comum/transacoes-contrato.ts`.
 rotas.use(rotasTransacoes);
+// Cadastro de morador é a ÚNICA escrita do app no Núcleo — arquivo próprio,
+// porque orquestra quatro chamadas e não é atômico. Ver `backend/moradores.ts`.
+rotas.use(rotasMoradores);
 
 // ---------------------------------------------------------------------------
 // Autorização
