@@ -193,4 +193,19 @@ export const reg360Api = {
   incorporacao: (id: number): Promise<any> => nucleo.buscar('incorporacoes', id),
   /** Ocupantes do lote (`imovel_pessoas`). Uma requisição por lote — ver o cliente. */
   pessoasDoLote: (id: number): Promise<any[]> => nucleo.listarSubRecurso('lotes', id, 'pessoas'),
+
+  // ---- Moradores (pessoas do Núcleo) ----
+  // `GET /pessoas` pagina no servidor e filtra por `busca` (ILIKE sobre nome,
+  // CPF, razão social e CNPJ) e por `tipo`. É uma das poucas listas do Núcleo
+  // que NÃO precisa de varredura: o filtro é do servidor porque o conjunto
+  // (~2.873 pessoas) não cabe confortavelmente em memória e a busca do Núcleo
+  // já cobre os dois campos que importam.
+  pessoas: (p?: { busca?: string; tipo?: string }, pagina = 1, porPagina = 50) =>
+    nucleo.listarPagina('pessoas', (p || {}) as Record<string, unknown>, pagina, porPagina),
+  pessoa: (id: number): Promise<any> => nucleo.buscar('pessoas', id),
+  /** Telefones e emails de uma PF — dois sub-recursos, uma requisição cada. */
+  telefonesDaPessoa: (id: number): Promise<any[]> =>
+    nucleo.listarSubRecurso('pessoas/fisicas', id, 'telefones'),
+  emailsDaPessoa: (id: number): Promise<any[]> =>
+    nucleo.listarSubRecurso('pessoas/fisicas', id, 'emails'),
 };

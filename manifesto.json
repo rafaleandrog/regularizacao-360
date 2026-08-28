@@ -20,7 +20,8 @@
   "nav": [
     { "titulo": "Regularização", "rota": "/", "icone": "fa-solid fa-city" },
     { "titulo": "Parcelamentos", "rota": "/parcelamentos", "icone": "fa-solid fa-map" },
-    { "titulo": "Unidades", "rota": "/unidades", "icone": "fa-solid fa-house" }
+    { "titulo": "Unidades", "rota": "/unidades", "icone": "fa-solid fa-house" },
+    { "titulo": "Moradores", "rota": "/moradores", "icone": "fa-solid fa-users" }
   ],
   "dependencias_nucleo": [
     "pessoas",
