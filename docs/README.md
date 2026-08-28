@@ -76,7 +76,15 @@ As seis tabelas do schema `reg360` e **por que cada uma existe fora do Núcleo**
 
 - **Núcleo** — entidades transversais, consumidas sobretudo por **leitura**: `setores_habitacionais`, `parcelamentos`, `incorporacoes`, `imoveis` (lote/gleba/unidade), `matriculas`, `pessoas` (física/jurídica).
 
-  O app **escreve** em quatro delas, e em contextos estreitos: `pessoas` (cadastrar morador — a única escrita das telas), e `imoveis`, `parcelamentos` e `matriculas`, que só o importador do Planilhão usa. As flags e quem as liga estão em [operacao.md](operacao).
+  O app **escreve** em quatro delas, e em contextos estreitos:
+
+  | Entidade | Quem escreve |
+  |---|---|
+  | `pessoas` | As telas (cadastrar morador) e o importador |
+  | `imoveis` | As telas — **vincular e desvincular morador do lote** passa por `POST /lotes/:id/pessoas`, que é gate de `imoveis` — e o importador, que cria lote |
+  | `parcelamentos`, `matriculas` | Só o importador do Planilhão |
+
+  Cortar `imoveis:escrever` achando que é só do importador **quebra o cadastro de morador pela tela**. As flags e quem as liga estão em [operacao.md](operacao).
 - **App (`reg360`)** — tudo que o Núcleo não tem e não vai ter, porque o monorepo é somente leitura: `propostas` (condições comerciais por período), `parcelamento_dados` (trâmite de regularização), `imovel_dados` (preços e quitação) e as três tabelas de `acoes` (ações judiciais e seus vínculos com imóveis e pessoas).
 
 Sem FK direta para o Núcleo — apenas referência lógica por ID, acessada via `req.nucleo` (backend) e `urbiVerso.nucleo()` (frontend).

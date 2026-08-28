@@ -54,7 +54,9 @@ O preço de contrato merece nota: enquanto a entidade Transação não existir n
 
 ## `acoes` + `acao_imoveis` + `acao_pessoas` — litígio
 
-Três tabelas porque uma ação é **sobre imóveis e/ou pessoas**: dois vínculos N:N, e a regra de que ao menos um precisa existir. Ação sobre nada nasceria invisível em toda tela.
+Três tabelas porque uma ação é **sobre imóveis e/ou pessoas**: dois vínculos N:N, e a regra de que ao menos um precisa existir. Ação sobre nada seria invisível em toda tela.
+
+A regra vale na **criação e na desvinculação**: remover o último vínculo devolve `409`, com a instrução de vincular outro antes ou remover a ação inteira. Checar só na criação não é invariante — é uma checagem que a operação seguinte desfaz.
 
 Ficam no schema do app **sem relação com outros apps** — nada de integração com o `charles3`, que vive em outro repositório.
 

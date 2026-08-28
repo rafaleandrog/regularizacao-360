@@ -13,11 +13,18 @@ export interface UrbiUsuario {
   avatar_url: string | null;
 }
 
+/**
+ * Contexto do app injetado pelo shell.
+ *
+ * **Só `rolesApp` e `nivelApp`.** A plataforma é explícita: permissão de app usa
+ * esses dois, e nada mais. As versões sem sufixo (`roles`, `nivel`) estavam
+ * aqui por suposição minha e viraram divergência real entre o gate da tela e o
+ * da API — inclusive pelo `[] || x` devolver `[]`, que escondia botão que a API
+ * aceitava. Tirar do tipo é o que impede alguém de alcançá-las de novo.
+ */
 export interface UrbiContexto {
   rolesApp?: string[];
   nivelApp?: string;
-  roles?: string[];
-  nivel?: string;
 }
 
 /**

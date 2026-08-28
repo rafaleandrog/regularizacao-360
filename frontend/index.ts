@@ -297,15 +297,34 @@ export class AppReg360 extends LitElement {
     this._desligarRota?.();
   }
 
+  /**
+   * Os gates da tela leem **exatamente** o que o backend lê: `rolesApp` e
+   * `nivelApp`. Nada mais.
+   *
+   * A versão anterior aceitava também `roles`/`nivel`, e divergia do backend
+   * nos dois sentidos:
+   *
+   * - `ctx.roles || ctx.rolesApp` — **array vazio é truthy em JS**. Com
+   *   `roles: []` e `rolesApp: ['criador']`, o `||` devolvia `[]` e a tela
+   *   escondia um botão que a API aceitaria.
+   * - `ctx.nivel === 'admin'` sem `nivelApp` mostrava controles que tomam 403.
+   *
+   * A plataforma é explícita: permissão de app usa `nivelApp` e `rolesApp`.
+   * `roles`/`nivel` eram suposição minha no shim de tipos, e suposição em gate
+   * não erra alto — erra escondendo ou oferecendo o botão errado.
+   */
+  private get _rolesApp(): string[] {
+    return urbiVerso.contexto?.()?.rolesApp ?? [];
+  }
+  private get _ehAdminApp(): boolean {
+    return urbiVerso.contexto?.()?.nivelApp === 'admin';
+  }
+
   private get podeCriar(): boolean {
-    const ctx = urbiVerso.contexto?.();
-    const roles = ctx?.roles || ctx?.rolesApp || [];
-    return ctx?.nivel === 'admin' || ctx?.nivelApp === 'admin' || roles.includes('criador');
+    return this._ehAdminApp || this._rolesApp.includes('criador');
   }
   private get podeAprovar(): boolean {
-    const ctx = urbiVerso.contexto?.();
-    const roles = ctx?.roles || ctx?.rolesApp || [];
-    return ctx?.nivel === 'admin' || ctx?.nivelApp === 'admin' || roles.includes('validador_interno');
+    return this._ehAdminApp || this._rolesApp.includes('validador_interno');
   }
 
   private _navegar(sub: string) {
@@ -532,9 +551,7 @@ export class AppReg360 extends LitElement {
   }
 
   private get podeEditarRegularizacao(): boolean {
-    const ctx = urbiVerso.contexto?.();
-    const roles = ctx?.roles || ctx?.rolesApp || [];
-    return ctx?.nivel === 'admin' || ctx?.nivelApp === 'admin' || roles.includes('editor_regularizacao');
+    return this._ehAdminApp || this._rolesApp.includes('editor_regularizacao');
   }
 
   private _abrirFormRegularizacao() {
@@ -1416,6 +1433,15 @@ export class AppReg360 extends LitElement {
                       ${(() => {
                         const a = this._agregadoDoParcelamento(p.id);
                         if (a.quantidade === 0) return nothing;
+                        // MESMA guarda do painel de detalhe. Sem ela, durante a
+                        // janela em que `_carregarBasesDoVgv` ainda corre, o card
+                        // mostra "VGV: R$ 0,00 — sobre 0 de N lotes": um zero com
+                        // cara de resposta, na PRIMEIRA tela que o usuário vê.
+                        if (!this.basesDoVgvCarregadas) {
+                          return html`<div class="prop-meta">
+                            ${this.carregandoVgv ? 'Calculando o VGV…' : 'VGV indisponível'}
+                          </div>`;
+                        }
                         return html`<div><strong>VGV: ${fmtMoeda(a.vgv)}</strong>
                           <span class="prop-meta"> ${this._rotuloCobertura(a)}</span></div>`;
                       })()}
