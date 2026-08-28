@@ -32,6 +32,10 @@ Montar o reverso, então, custa **uma requisição por imóvel**. Para os ~6.200
 
 O terceiro existe por causa do que está acima. Sem o índice, a app **não sabe** se a pessoa tem vínculo com imóvel — e "não sei" não é "não tem". Marcar de vermelho um cadastro que talvez esteja completo manda alguém corrigir o que não está quebrado, e some com a confiança na coluna inteira.
 
+**Ausência do índice nunca vira `[]`.** É a metade da regra que é fácil de perder: o índice cobre um parcelamento, e a lista é da instância inteira, então "não está no mapa" significa *não olhei aqui* — não *não tem*. Traduzir para lista vazia marcaria `incompleto` quem está vinculada só a outro parcelamento, reintroduzindo uma camada acima o erro que os três estados existem para impedir. `vinculosConhecidos()` nomeia a regra, e um teste a trava.
+
+Consequência aceita: **esta tela nunca conclui "não tem vínculo".** Ela não pode — provar ausência global exigiria varrer a instância inteira. Quem está no índice tem vínculo por construção; quem não está é desconhecido.
+
 A regra em `comum/moradores.ts`:
 
 - **nome** e **CPF** ausentes → `incompleto` sempre. Não dependem de consulta.
@@ -47,6 +51,12 @@ A lista de Parcelamentos filtra **no cliente**; a de Moradores, **no servidor**.
 - ~2.873 pessoas não cabem confortavelmente, e o `busca` do Núcleo já cobre nome e CPF.
 
 O preço é o conhecido: o `busca` é `ILIKE`, então **não cruza acento** — quem digita `jose` não acha `José`. A tela avisa isso em vez de deixar o usuário concluir que a pessoa não existe.
+
+## Lote que falha não é lote vazio
+
+Ao indexar, cada lote é uma requisição, e algumas falham. Tratar a falha como "este lote não tem ocupante" esconderia moradores reais **e** apresentaria o recorte como completo — a tela diria "nenhum imóvel" para quem tem um.
+
+Os lotes que falharam ficam **fora** do índice e são contados: o banner diz quantos não responderam e que o recorte está incompleto. Reindexar tenta de novo.
 
 Contatos vêm por sub-recurso, **uma requisição por pessoa visível**, em janela de 6 simultâneos (`comum/concorrencia.ts`) — o Núcleo não expande contato na listagem, mesmo motivo dos ocupantes na tabela de lotes.
 

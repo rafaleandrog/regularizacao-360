@@ -109,6 +109,25 @@ export function indexarPorPessoa(
   return mapa;
 }
 
+/**
+ * O que o índice PARCIAL sabe sobre os vínculos de uma pessoa.
+ *
+ * Existe para nomear — e travar com teste — a regra que é fácil de perder:
+ * **ausência no índice não é ausência de vínculo.** O índice cobre um recorte
+ * (um parcelamento), e a lista de moradores é da instância inteira; traduzir
+ * "não está no mapa" para `[]` marcaria `incompleto` quem está vinculada só a
+ * outro parcelamento.
+ *
+ * Quem ESTÁ no mapa tem vínculo por construção: só entrou porque um imóvel a
+ * listou. Então este índice nunca prova ausência — só presença.
+ */
+export function vinculosConhecidos(
+  indice: Map<number, unknown[]>,
+  pessoaId: unknown,
+): unknown[] | undefined {
+  return indice?.get(Number(pessoaId));
+}
+
 /** Rótulos humanos de `tipo_vinculo`, que é distinção jurídica do Núcleo. */
 export const ROTULO_VINCULO: Record<string, string> = {
   posse_legitima: 'Posse legítima',

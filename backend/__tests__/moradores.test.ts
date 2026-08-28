@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { situacaoCadastro, indexarPorPessoa } from '../../comum/moradores.js';
+import { situacaoCadastro, indexarPorPessoa, vinculosConhecidos } from '../../comum/moradores.js';
 
 const PESSOA = { nome: 'Maria', cpf: '09977579148' };
 
@@ -84,5 +84,35 @@ describe('indexarPorPessoa — o reverso que o Núcleo não entrega', () => {
 
   test('lista vazia devolve mapa vazio', () => {
     assert.equal(indexarPorPessoa([]).size, 0);
+  });
+});
+
+
+describe('vinculosConhecidos — ausência no índice parcial não é ausência de vínculo', () => {
+  test('pessoa no índice devolve a lista dela', () => {
+    const idx = new Map<number, unknown[]>([[7, [{}, {}]]]);
+    assert.equal(vinculosConhecidos(idx, 7)!.length, 2);
+  });
+
+  test('pessoa FORA do índice devolve undefined, nunca []', () => {
+    // O índice cobre um parcelamento; a lista é da instância inteira. Traduzir
+    // "não está no mapa" para [] marcaria incompleto quem está vinculada só a
+    // outro parcelamento — e contradiz o que a tela promete no banner.
+    const idx = new Map<number, unknown[]>([[7, [{}]]]);
+    assert.equal(vinculosConhecidos(idx, 8), undefined);
+    assert.notDeepEqual(vinculosConhecidos(idx, 8), []);
+  });
+
+  test('e a situação daí sai indeterminada, não incompleta', () => {
+    const idx = new Map<number, unknown[]>([[7, [{}]]]);
+    const s = situacaoCadastro({ nome: 'Maria', cpf: '1' }, {
+      contatos: { telefones: [{}] },
+      vinculos: vinculosConhecidos(idx, 8),
+    });
+    assert.equal(s.estado, 'indeterminado');
+  });
+
+  test('índice vazio não afirma nada sobre ninguém', () => {
+    assert.equal(vinculosConhecidos(new Map(), 7), undefined);
   });
 });

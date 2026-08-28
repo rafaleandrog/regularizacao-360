@@ -18,6 +18,7 @@ import { soData, hoje, statusVigencia, type StatusVigencia } from '../comum/casc
 import {
   situacaoCadastro,
   indexarPorPessoa,
+  vinculosConhecidos,
   BADGE_SITUACAO,
   ROTULO_VINCULO,
   type Situacao,
@@ -238,6 +239,8 @@ export class AppReg360 extends LitElement {
   @state() private imoveisPorPessoa = new Map<number, Array<{ imovel: any; vinculo: any }>>();
   @state() private parcelamentoIndexado: number | null = null;
   @state() private indexando = false;
+  /** Lotes cuja leitura de ocupantes falhou — o recorte saiu incompleto. */
+  @state() private lotesQueFalharam = 0;
 
   /** Ações do imóvel aberto, com os vínculos que a rota já devolve junto. */
   @state() private acoes: Acao[] = [];
@@ -312,6 +315,18 @@ export class AppReg360 extends LitElement {
           break;
         case 'unidades':
           this.unidades = await reg360Api.unidades();
+          break;
+        case 'moradores':
+          // Parcelamentos vêm junto porque o seletor de recorte do índice sai
+          // da lista real, nunca de array literal.
+          this.parcelamentos = await reg360Api.parcelamentos();
+          await this._carregarMoradores(1);
+          break;
+        case 'morador':
+          if (this.rota.id) {
+            this.detalhe = await reg360Api.pessoa(this.rota.id);
+            await this._carregarContatos([this.detalhe]);
+          }
           break;
         case 'setor':
           if (this.rota.id) {
@@ -620,22 +635,28 @@ export class AppReg360 extends LitElement {
     if (parcelamentoId === null) {
       this.parcelamentoIndexado = null;
       this.imoveisPorPessoa = new Map();
+      this.lotesQueFalharam = 0;
       return;
     }
     this.indexando = true;
     try {
       const lotes = await reg360Api.lotes({ parcelamento_id: parcelamentoId });
+      // Lote que falha NÃO vira lote sem ocupante. Engolir o erro como lista
+      // vazia esconderia moradores reais e ainda apresentaria o recorte como
+      // completo — a tela diria "nenhum imóvel" para quem tem um.
       const pares = await mapaComLimite(lotes, 6, async (l: any) => {
         try {
-          return { imovel: l, vinculos: await reg360Api.pessoasDoLote(Number(l.id)) };
+          return { imovel: l, vinculos: await reg360Api.pessoasDoLote(Number(l.id)), falhou: false };
         } catch {
-          return { imovel: l, vinculos: [] };
+          return { imovel: l, vinculos: [], falhou: true };
         }
       });
-      this.imoveisPorPessoa = indexarPorPessoa(pares);
+      this.lotesQueFalharam = pares.filter((r) => r.falhou).length;
+      this.imoveisPorPessoa = indexarPorPessoa(pares.filter((r) => !r.falhou));
       this.parcelamentoIndexado = parcelamentoId;
     } catch (e: any) {
       this.parcelamentoIndexado = null;
+      this.lotesQueFalharam = 0;
       this._registrarFalha(e, 'Falha ao indexar o parcelamento');
     } finally {
       this.indexando = false;
@@ -645,17 +666,22 @@ export class AppReg360 extends LitElement {
   /**
    * Situação de uma pessoa, com o que se sabe DELA.
    *
-   * `vinculos` só entra quando o índice foi montado — senão fica `undefined`, e
-   * a situação sai `indeterminado` em vez de `incompleto`. "Não consultei" não
-   * é "não tem".
+   * **Ausência do índice nunca vira `[]`.** O índice cobre UM parcelamento, e a
+   * tabela lista as pessoas da instância inteira: quem está vinculada só a
+   * outro parcelamento não aparece no mapa, e traduzir isso para "consultado e
+   * sem vínculo" a marcaria `incompleto` — o erro exato que os três estados
+   * existem para impedir, reintroduzido uma camada acima.
+   *
+   * Só o que está NO mapa é conhecido. E quem está no mapa tem vínculo por
+   * construção — ela só entrou ali porque um lote a listou —, então este ecrã
+   * nunca conclui "não tem vínculo". Ele não pode: provar ausência global de
+   * vínculo exigiria varrer a instância toda.
    */
   private _situacaoDe(p: any): Situacao {
     const id = Number(p?.id);
     return situacaoCadastro(p, {
       contatos: this.contatosPorPessoa.get(id),
-      vinculos: this.parcelamentoIndexado !== null
-        ? (this.imoveisPorPessoa.get(id) || [])
-        : undefined,
+      vinculos: vinculosConhecidos(this.imoveisPorPessoa, id),
     });
   }
 
@@ -1501,8 +1527,14 @@ export class AppReg360 extends LitElement {
 
       <urbi-banner variante=${indexado ? 'info' : 'alerta'}>
         ${indexado
-          ? html`Imóveis e situação completos para <strong>${this._nomeParcelamento(this.parcelamentoIndexado)}</strong>.
-              Pessoa de outro parcelamento continua com situação indeterminada.`
+          ? html`Imóveis preenchidos para <strong>${this._nomeParcelamento(this.parcelamentoIndexado)}</strong>.
+              Pessoa vinculada só a outro parcelamento continua sem imóvel nesta coluna — o índice
+              cobre um recorte, e ausência aqui <strong>não</strong> quer dizer ausência de vínculo.
+              ${this.lotesQueFalharam > 0
+                ? html`<br><strong>${this.lotesQueFalharam} lote(s) não responderam</strong>, então o
+                    recorte está incompleto: quem só se vincula a eles não aparece. Escolha o
+                    parcelamento de novo para tentar outra vez.`
+                : nothing}`
           : html`<strong>A coluna de imóveis está vazia de propósito.</strong>
               O Núcleo entrega o vínculo morador↔imóvel só pelo lado do imóvel — não há rota de
               pessoa → imóveis. Montar o reverso custa <strong>uma requisição por lote</strong>, o que
