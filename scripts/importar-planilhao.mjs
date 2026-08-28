@@ -85,6 +85,50 @@ export function soDigitos(s) {
 }
 
 /**
+ * Lê um número do Planilhão, distinguindo separador decimal de milhar.
+ *
+ * **Apagar todo ponto é o erro óbvio e caro.** `'161.10'` viraria `16110` — e o
+ * preço é gravação única: um valor inflado assim exigiria a rota de correção,
+ * que é só do admin. O ponto é milhar em `1.234,56` e decimal em `161.10`, e o
+ * texto sozinho nem sempre diz qual.
+ *
+ * As regras, da mais segura para a menos:
+ *
+ * - tem vírgula → ela é o decimal, e todo ponto é milhar (formato pt-BR);
+ * - só pontos, mais de um → todos milhar (`1.234.567`);
+ * - um ponto com 1 ou 2 dígitos depois → decimal (`161.10`, `161.1`);
+ * - um ponto com exatamente 3 dígitos depois → **AMBÍGUO**. `1.234` é 1234 em
+ *   pt-BR e 1,234 em inglês, e não há como saber pelo texto.
+ *
+ * O ambíguo não é chutado: devolve `{ ambiguo }`, e quem chama reporta em vez
+ * de gravar. Chutar aqui grava número errado em campo que não se desfaz.
+ */
+export function lerNumeroBR(s) {
+  const bruto = String(s ?? '').replace(/[R$\s]/g, '').trim();
+  if (!bruto) return { valor: null };
+  if (!/^-?[\d.,]+$/.test(bruto)) return { valor: null };
+
+  const temVirgula = bruto.includes(',');
+  const pontos = (bruto.match(/\./g) || []).length;
+
+  let normalizado;
+  if (temVirgula) {
+    normalizado = bruto.replace(/\./g, '').replace(',', '.');
+  } else if (pontos === 0) {
+    normalizado = bruto;
+  } else if (pontos > 1) {
+    normalizado = bruto.replace(/\./g, '');
+  } else {
+    const depois = bruto.split('.')[1] ?? '';
+    if (depois.length === 3) return { ambiguo: bruto };
+    normalizado = bruto;
+  }
+
+  const n = Number(normalizado);
+  return Number.isFinite(n) ? { valor: n } : { valor: null };
+}
+
+/**
  * Área do Planilhão. Vazio é `null`, **não zero**.
  *
  * `Number('')` é `0`, e a versão anterior deixava isso passar — lote sem área
@@ -96,20 +140,25 @@ export function soDigitos(s) {
  *
  * Ou seja: um zero importado aqui reintroduz, pelo dado, o defeito que o
  * agregado conserta no código.
+ *
+ * Área ambígua vira `null` (não importada) em vez de um número chutado — a
+ * área errada é o que mais mente no VGV.
  */
 export function normalizarArea(s) {
-  const bruto = String(s ?? '').trim();
-  if (!bruto) return null;
-  const n = Number(bruto.replace(/\./g, '').replace(',', '.'));
-  return Number.isFinite(n) && n >= 0 ? n : null;
+  const r = lerNumeroBR(s);
+  if (r.ambiguo || r.valor === null || r.valor < 0) return null;
+  return r.valor;
 }
 
-/** Preço do Planilhão: aceita "1.234,56" e "1234.56". `null` quando vazio. */
+/**
+ * Preço do Planilhão. `null` quando vazio; `{ ambiguo }` quando o separador não
+ * dá para decidir — e aí a linha vai ao relatório em vez de gravar.
+ */
 export function normalizarPreco(s) {
-  const bruto = String(s ?? '').trim();
-  if (!bruto) return null;
-  const n = Number(bruto.replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.'));
-  return Number.isFinite(n) && n >= 0 ? n : null;
+  const r = lerNumeroBR(s);
+  if (r.ambiguo) return r;
+  if (r.valor === null || r.valor < 0) return { valor: null };
+  return r;
 }
 
 /**
@@ -347,19 +396,27 @@ export async function importar(linhas, rel, colunas = COLUNAS) {
       // firmado, e perdê-lo é a razão de ele existir. A divergência entra no
       // relatório para alguém decidir — o script não decide por ninguém.
       const preco = normalizarPreco(row[colunas.preco]);
-      if (preco !== null && typeof lote.id === 'number') {
+      if (preco.ambiguo) {
+        // Separador indecidível: `1.234` é 1234 em pt-BR e 1,234 em inglês.
+        // Gravar um chute num campo de gravação única exigiria a rota de
+        // correção, que é só do admin — melhor reportar e deixar sem preço.
+        rel.divergencias.push(
+          `Linha ${nLinha}: preço '${preco.ambiguo}' tem separador ambíguo (ponto com 3 casas). `
+          + 'Não importado — corrija o CSV para 1.234,00 ou 1234.',
+        );
+      } else if (preco.valor !== null && typeof lote.id === 'number') {
         if (EXECUTAR) {
           try {
             await req(`/imovel-dados/lote/${lote.id}/preco-estatico`, {
               method: 'POST',
-              body: JSON.stringify({ preco_estatico: preco }),
+              body: JSON.stringify({ preco_estatico: preco.valor }),
             });
             conta(rel.criados, 'preco_estatico');
           } catch (e) {
             if (e.status === 409) {
               rel.divergencias.push(
                 `Linha ${nLinha}: lote ${lote.id} já tem preço de contrato gravado; `
-                + `o Planilhão traz ${preco}. Não sobrescrito.`,
+                + `o Planilhão traz ${preco.valor}. Não sobrescrito.`,
               );
             } else throw e;
           }

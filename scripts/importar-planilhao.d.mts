@@ -20,8 +20,12 @@ export declare const ENDPOINTS: {
 
 export declare function slugify(s: unknown): string;
 export declare function soDigitos(s: unknown): string;
+/** `{ valor }` quando dá para decidir o separador; `{ ambiguo }` quando não. */
+export type NumeroLido = { valor: number | null; ambiguo?: undefined }
+  | { ambiguo: string; valor?: undefined };
+export declare function lerNumeroBR(s: unknown): NumeroLido;
 export declare function normalizarArea(s: unknown): number | null;
-export declare function normalizarPreco(s: unknown): number | null;
+export declare function normalizarPreco(s: unknown): NumeroLido;
 export declare function casaComChave(registro: any, chave: Record<string, unknown>): boolean;
 export declare function parseCsv(texto: string): Array<Record<string, string>>;
 export declare function temTransacaoPendente(row: any, colunas?: Record<string, string>): boolean;

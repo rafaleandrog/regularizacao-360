@@ -64,21 +64,39 @@ describe('o caminho de pessoas físicas leva BARRA, não hífen', () => {
   });
 });
 
-describe('normalizarPreco', () => {
-  test('formato brasileiro e formato simples', () => {
-    assert.equal(normalizarPreco('1.234,56'), 1234.56);
-    assert.equal(normalizarPreco('300'), 300);
-    assert.equal(normalizarPreco('R$ 1.008,85'), 1008.85);
+describe('normalizarPreco — o ponto é milhar OU decimal, e apagar todo ponto é caro', () => {
+  test('formato pt-BR: ponto é milhar, vírgula é decimal', () => {
+    assert.deepEqual(normalizarPreco('1.234,56'), { valor: 1234.56 });
+    assert.deepEqual(normalizarPreco('R$ 1.008,85'), { valor: 1008.85 });
   });
+
+  test('ponto com 1 ou 2 casas é DECIMAL — apagá-lo inflava o preço', () => {
+    // `161,10 × 194,82` é o número da tela do legado. Com o `.replace(/\./g,'')`
+    // anterior, '161.10' virava 16110 — e preço é gravação única, então
+    // corrigir exigiria a rota de admin.
+    assert.deepEqual(normalizarPreco('161.10'), { valor: 161.1 });
+    assert.deepEqual(normalizarPreco('300.5'), { valor: 300.5 });
+  });
+
+  test('mais de um ponto é milhar', () => {
+    assert.deepEqual(normalizarPreco('1.234.567'), { valor: 1234567 });
+  });
+
+  test('ponto com EXATAMENTE 3 casas é ambíguo e NÃO é chutado', () => {
+    // '1.234' é 1234 em pt-BR e 1,234 em inglês. O texto não diz qual.
+    assert.deepEqual(normalizarPreco('1.234'), { ambiguo: '1.234' });
+  });
+
   test('vazio é null, não zero — zero é preço legítimo', () => {
-    assert.equal(normalizarPreco(''), null);
-    assert.equal(normalizarPreco(null), null);
-    assert.equal(normalizarPreco('   '), null);
-    assert.equal(normalizarPreco('0'), 0);
+    assert.deepEqual(normalizarPreco(''), { valor: null });
+    assert.deepEqual(normalizarPreco(null), { valor: null });
+    assert.deepEqual(normalizarPreco('   '), { valor: null });
+    assert.deepEqual(normalizarPreco('0'), { valor: 0 });
   });
+
   test('lixo e negativo são null', () => {
-    assert.equal(normalizarPreco('a combinar'), null);
-    assert.equal(normalizarPreco('-5'), null);
+    assert.deepEqual(normalizarPreco('a combinar'), { valor: null });
+    assert.deepEqual(normalizarPreco('-5'), { valor: null });
   });
 });
 
@@ -112,6 +130,16 @@ describe('normalizarArea — vazio é null, NUNCA zero', () => {
   test('formato brasileiro', () => {
     assert.equal(normalizarArea('1.008,85'), 1008.85);
     assert.equal(normalizarArea('194,82'), 194.82);
+  });
+
+  test('ponto decimal é preservado — 1008.85 não vira 100885', () => {
+    assert.equal(normalizarArea('1008.85'), 1008.85);
+    assert.equal(normalizarArea('194.8'), 194.8);
+  });
+
+  test('área com separador ambíguo NÃO é importada', () => {
+    // Área errada é o que mais mente no VGV; melhor sem área que com chute.
+    assert.equal(normalizarArea('1.008'), null);
   });
 
   test('vazio devolve null', () => {

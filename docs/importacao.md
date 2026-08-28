@@ -36,6 +36,21 @@ Não é detalhe: no Núcleo, **`area` nula é o sinal de que a área vem da matr
 
 Um zero importado aqui reintroduz, **pelo dado**, o defeito que o agregado conserta no código.
 
+### 4. Ponto que é decimal, apagado como se fosse milhar
+
+`161.10` virava **16110**. A conversão apagava todo ponto antes de converter, tratando-o sempre como separador de milhar — e o preço é **gravação única**, então um valor inflado assim só se corrige pela rota de admin.
+
+O separador agora é decidido pelo texto:
+
+| Entrada | Leitura | Por quê |
+|---|---|---|
+| `1.234,56` | 1234,56 | tem vírgula → ela é o decimal, ponto é milhar |
+| `1.234.567` | 1234567 | mais de um ponto → todos milhar |
+| `161.10` | 161,10 | um ponto, 1–2 casas → decimal |
+| `1.234` | **ambíguo** | 1234 em pt-BR, 1,234 em inglês — o texto não diz |
+
+**O ambíguo não é chutado.** A linha vai para o relatório e o campo fica sem valor. Chutar grava número errado num campo que não se desfaz — e área errada é o que mais mente no VGV.
+
 ## Mapeamento
 
 | Planilhão | Destino | Chave de upsert |
