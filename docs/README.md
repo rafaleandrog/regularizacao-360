@@ -49,6 +49,10 @@ Duas classificações independentes — a **fase** derivada das datas do trâmit
 
 Σ (preço aplicável × área) de **todos** os lotes — potencial, não realizado — e o número diz sobre quantos lotes foi feito. Ver [vgv.md](vgv).
 
+## Moradores
+
+Lista de pessoas do Núcleo, com busca de servidor. A coluna de imóveis depende de um recorte escolhido pelo usuário, porque o Núcleo não expõe pessoa → imóveis — e a situação de cadastro tem **três** estados por causa disso. Ver [moradores.md](moradores).
+
 ## Ações judiciais
 
 Sobre imóveis **e/ou** pessoas, com o polo (`UP contra` / `contra UP`) guardado como dado e o título montado de uma função só. Ver [acoes.md](acoes).

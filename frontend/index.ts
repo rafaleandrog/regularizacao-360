@@ -16,6 +16,14 @@ import {
 } from '../comum/regularizacao.js';
 import { soData, hoje, statusVigencia, type StatusVigencia } from '../comum/cascata.js';
 import {
+  situacaoCadastro,
+  indexarPorPessoa,
+  vinculosConhecidos,
+  BADGE_SITUACAO,
+  ROTULO_VINCULO,
+  type Situacao,
+} from '../comum/moradores.js';
+import {
   badgeAcao,
   destacaNoCabecalho,
   tituloAcao,
@@ -94,7 +102,7 @@ function nomeDe(o: any): string {
 }
 
 interface Rota {
-  view: 'home' | 'parcelamentos' | 'unidades' | 'setor' | 'parcelamento' | 'lote' | 'unidade' | 'proposta';
+  view: 'home' | 'parcelamentos' | 'unidades' | 'moradores' | 'setor' | 'parcelamento' | 'lote' | 'unidade' | 'proposta' | 'morador';
   id: number | null;
   /**
    * Filtro de Setor da lista de Parcelamentos. Vai na sub-rota
@@ -123,6 +131,8 @@ function parseRota(sub: string): Rota {
       };
     }
     case 'unidades': return { view: 'unidades', id: null };
+    case 'moradores': return { view: 'moradores', id: null };
+    case 'morador': return { view: 'morador', id };
     case 'setor': return { view: 'setor', id };
     case 'parcelamento': return { view: 'parcelamento', id };
     case 'lote': return { view: 'lote', id };
@@ -214,6 +224,24 @@ export class AppReg360 extends LitElement {
    */
   @state() private basesDoVgvCarregadas = false;
 
+  /** Moradores: página do Núcleo, busca do servidor, e o índice reverso. */
+  @state() private moradores: any[] = [];
+  @state() private moradoresPagina = 1;
+  @state() private moradoresPaginas = 1;
+  @state() private moradoresTotal = 0;
+  @state() private buscaMorador = '';
+  @state() private contatosPorPessoa = new Map<number, { telefones: any[]; emails: any[] }>();
+  /**
+   * Imóveis por pessoa. Só existe para o parcelamento que o usuário escolheu
+   * indexar — o Núcleo não entrega o reverso, e montá-lo para a instância
+   * inteira custaria uma requisição por lote (~6.200).
+   */
+  @state() private imoveisPorPessoa = new Map<number, Array<{ imovel: any; vinculo: any }>>();
+  @state() private parcelamentoIndexado: number | null = null;
+  @state() private indexando = false;
+  /** Lotes cuja leitura de ocupantes falhou — o recorte saiu incompleto. */
+  @state() private lotesQueFalharam = 0;
+
   /** Ações do imóvel aberto, com os vínculos que a rota já devolve junto. */
   @state() private acoes: Acao[] = [];
   @state() private carregandoAcoes = false;
@@ -287,6 +315,18 @@ export class AppReg360 extends LitElement {
           break;
         case 'unidades':
           this.unidades = await reg360Api.unidades();
+          break;
+        case 'moradores':
+          // Parcelamentos vêm junto porque o seletor de recorte do índice sai
+          // da lista real, nunca de array literal.
+          this.parcelamentos = await reg360Api.parcelamentos();
+          await this._carregarMoradores(1);
+          break;
+        case 'morador':
+          if (this.rota.id) {
+            this.detalhe = await reg360Api.pessoa(this.rota.id);
+            await this._carregarContatos([this.detalhe]);
+          }
           break;
         case 'setor':
           if (this.rota.id) {
@@ -521,6 +561,128 @@ export class AppReg360 extends LitElement {
     } catch (e: any) {
       this._registrarFalha(e, 'Falha ao carregar preços do imóvel');
     }
+  }
+
+  /**
+   * Uma página de moradores. A busca é do SERVIDOR — ao contrário da lista de
+   * parcelamentos, que filtra no cliente.
+   *
+   * A diferença não é gosto: 60 parcelamentos cabem em memória e a varredura já
+   * os tem; ~2.873 pessoas não cabem confortavelmente, e o `busca` do Núcleo já
+   * cobre nome e CPF, que são os dois campos que importam aqui. O preço é o
+   * conhecido: ILIKE não cruza acento, então `jose` não acha `José`.
+   */
+  private async _carregarMoradores(pagina: number) {
+    this.carregando = true;
+    try {
+      const r: any = await reg360Api.pessoas(
+        { busca: this.buscaMorador.trim() || undefined, tipo: 'fisica' },
+        pagina,
+      );
+      this.moradores = r?.dados || [];
+      this.moradoresPagina = Number(r?.pagina) || pagina;
+      this.moradoresPaginas = Number(r?.paginas) || 1;
+      this.moradoresTotal = Number(r?.total) || this.moradores.length;
+      void this._carregarContatos(this.moradores);
+    } catch (e: any) {
+      this._registrarFalha(e, 'Falha ao carregar moradores');
+    } finally {
+      this.carregando = false;
+    }
+  }
+
+  /**
+   * Telefones e emails das pessoas visíveis. Dois sub-recursos por pessoa, em
+   * janela de simultâneos — é o mesmo custo por linha dos ocupantes do lote, e
+   * pela mesma razão: o Núcleo não expande contato na listagem.
+   */
+  private async _carregarContatos(pessoas: any[]) {
+    const alvo = (pessoas || []).filter((p) => p && !this.contatosPorPessoa.has(Number(p.id)));
+    if (alvo.length === 0) return;
+    const resultados = await mapaComLimite(alvo, 6, async (p: any) => {
+      const id = Number(p.id);
+      try {
+        const [telefones, emails] = await Promise.all([
+          reg360Api.telefonesDaPessoa(id),
+          reg360Api.emailsDaPessoa(id),
+        ]);
+        return [id, { telefones, emails }] as [number, { telefones: any[]; emails: any[] }];
+      } catch {
+        // Uma pessoa que falha não derruba a página. Ela fica sem contato
+        // CONSULTADO, e a situação dela sai indeterminada — que é a verdade.
+        return null;
+      }
+    });
+    const mapa = new Map(this.contatosPorPessoa);
+    for (const r of resultados) if (r) mapa.set(r[0], r[1]);
+    this.contatosPorPessoa = mapa;
+  }
+
+  /**
+   * Monta o índice reverso pessoa → imóveis para UM parcelamento.
+   *
+   * O Núcleo expõe `imovel_pessoas` só pelo lado do imóvel — não há rota de
+   * pessoa → imóveis nem filtro `pessoa_id` em `/imoveis` ou `/lotes`. Então o
+   * reverso se monta lendo os ocupantes de cada lote, uma requisição por lote.
+   *
+   * Por isso o recorte é do usuário e não automático: um parcelamento custa
+   * ~100 requisições e é útil; a instância inteira custaria ~6.200 e travaria a
+   * tela. É a mesma decisão da busca por morador dentro do parcelamento — o
+   * usuário escolhe pagar o custo, a tela não o cobra por conta própria.
+   */
+  private async _indexarParcelamento(parcelamentoId: number | null) {
+    if (this.indexando) return;
+    if (parcelamentoId === null) {
+      this.parcelamentoIndexado = null;
+      this.imoveisPorPessoa = new Map();
+      this.lotesQueFalharam = 0;
+      return;
+    }
+    this.indexando = true;
+    try {
+      const lotes = await reg360Api.lotes({ parcelamento_id: parcelamentoId });
+      // Lote que falha NÃO vira lote sem ocupante. Engolir o erro como lista
+      // vazia esconderia moradores reais e ainda apresentaria o recorte como
+      // completo — a tela diria "nenhum imóvel" para quem tem um.
+      const pares = await mapaComLimite(lotes, 6, async (l: any) => {
+        try {
+          return { imovel: l, vinculos: await reg360Api.pessoasDoLote(Number(l.id)), falhou: false };
+        } catch {
+          return { imovel: l, vinculos: [], falhou: true };
+        }
+      });
+      this.lotesQueFalharam = pares.filter((r) => r.falhou).length;
+      this.imoveisPorPessoa = indexarPorPessoa(pares.filter((r) => !r.falhou));
+      this.parcelamentoIndexado = parcelamentoId;
+    } catch (e: any) {
+      this.parcelamentoIndexado = null;
+      this.lotesQueFalharam = 0;
+      this._registrarFalha(e, 'Falha ao indexar o parcelamento');
+    } finally {
+      this.indexando = false;
+    }
+  }
+
+  /**
+   * Situação de uma pessoa, com o que se sabe DELA.
+   *
+   * **Ausência do índice nunca vira `[]`.** O índice cobre UM parcelamento, e a
+   * tabela lista as pessoas da instância inteira: quem está vinculada só a
+   * outro parcelamento não aparece no mapa, e traduzir isso para "consultado e
+   * sem vínculo" a marcaria `incompleto` — o erro exato que os três estados
+   * existem para impedir, reintroduzido uma camada acima.
+   *
+   * Só o que está NO mapa é conhecido. E quem está no mapa tem vínculo por
+   * construção — ela só entrou ali porque um lote a listou —, então este ecrã
+   * nunca conclui "não tem vínculo". Ele não pode: provar ausência global de
+   * vínculo exigiria varrer a instância toda.
+   */
+  private _situacaoDe(p: any): Situacao {
+    const id = Number(p?.id);
+    return situacaoCadastro(p, {
+      contatos: this.contatosPorPessoa.get(id),
+      vinculos: vinculosConhecidos(this.imoveisPorPessoa, id),
+    });
   }
 
   /**
@@ -901,6 +1063,7 @@ export class AppReg360 extends LitElement {
     const abaTopo =
       this.rota.view === 'parcelamentos' || this.rota.view === 'parcelamento' ? 'parcelamentos'
       : this.rota.view === 'unidades' || this.rota.view === 'unidade' ? 'unidades'
+      : this.rota.view === 'moradores' || this.rota.view === 'morador' ? 'moradores'
       : 'regularizacao';
 
     return html`
@@ -910,6 +1073,7 @@ export class AppReg360 extends LitElement {
             { id: 'regularizacao', label: 'Regularização', icone: 'fa-solid fa-city' },
             { id: 'parcelamentos', label: 'Parcelamentos', icone: 'fa-solid fa-map' },
             { id: 'unidades', label: 'Unidades', icone: 'fa-solid fa-house' },
+            { id: 'moradores', label: 'Moradores', icone: 'fa-solid fa-users' },
           ]}
           ativa=${abaTopo}
           @urbi:aba-selecionar=${(e: CustomEvent) => {
@@ -952,6 +1116,8 @@ export class AppReg360 extends LitElement {
       case 'home': return this._renderHome();
       case 'parcelamentos': return this._renderListaParcelamentos();
       case 'unidades': return this._renderListaUnidades();
+      case 'moradores': return this._renderMoradores();
+      case 'morador': return this._renderDetalheMorador();
       case 'setor': return this._renderDetalheSetor();
       case 'parcelamento': return this._renderDetalheParcelamento();
       case 'lote':
@@ -1330,6 +1496,157 @@ export class AppReg360 extends LitElement {
         : this.abaDetalhe === 'acoes'
           ? this._renderAcoes(u)
           : this._renderPropostasVigentes(this.rota.view, u.id)}
+    `;
+  }
+
+  /**
+   * Tela de Moradores.
+   *
+   * A coluna de imóveis fica vazia até o usuário escolher um parcelamento para
+   * indexar — e isso é dito na tela, não escondido. O Núcleo não entrega
+   * pessoa → imóveis, e preencher a coluna para as ~2.873 pessoas exigiria uma
+   * requisição por lote da instância inteira.
+   */
+  private _renderMoradores(): TemplateResult {
+    const indexado = this.parcelamentoIndexado !== null;
+    const buscar = () => { this.moradoresPagina = 1; void this._carregarMoradores(1); };
+    return html`
+      <h2>Moradores</h2>
+      <p class="prop-meta">
+        ${this.moradoresTotal} pessoa(s) física(s) no Núcleo.
+        A busca é do servidor, sobre nome e CPF — e, como ela é <code>ILIKE</code>,
+        <strong>não cruza acento</strong>: procure <em>José</em>, não <em>jose</em>.
+      </p>
+      <urbi-input label="Nome ou CPF" .valor=${this.buscaMorador}
+        @urbi:input-change=${(e: CustomEvent) => { this.buscaMorador = String(e.detail.valor ?? ''); }}
+        @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') buscar(); }}></urbi-input>
+      <div class="barra-acoes">
+        <urbi-botao variante="primario" pequeno icone="fa-solid fa-magnifying-glass"
+          ?carregando=${this.carregando} @click=${buscar}>Buscar</urbi-botao>
+      </div>
+
+      <urbi-banner variante=${indexado ? 'info' : 'alerta'}>
+        ${indexado
+          ? html`Imóveis preenchidos para <strong>${this._nomeParcelamento(this.parcelamentoIndexado)}</strong>.
+              Pessoa vinculada só a outro parcelamento continua sem imóvel nesta coluna — o índice
+              cobre um recorte, e ausência aqui <strong>não</strong> quer dizer ausência de vínculo.
+              ${this.lotesQueFalharam > 0
+                ? html`<br><strong>${this.lotesQueFalharam} lote(s) não responderam</strong>, então o
+                    recorte está incompleto: quem só se vincula a eles não aparece. Escolha o
+                    parcelamento de novo para tentar outra vez.`
+                : nothing}`
+          : html`<strong>A coluna de imóveis está vazia de propósito.</strong>
+              O Núcleo entrega o vínculo morador↔imóvel só pelo lado do imóvel — não há rota de
+              pessoa → imóveis. Montar o reverso custa <strong>uma requisição por lote</strong>, o que
+              é viável para um parcelamento (~100) e não para a instância (~6.200).
+              Escolha um parcelamento abaixo para preencher a coluna dele.`}
+      </urbi-banner>
+
+      <urbi-select label="Indexar os moradores de um parcelamento"
+        .opcoes=${[{ valor: '', rotulo: '— nenhum —' },
+          ...this.parcelamentos.map((p: any) => ({ valor: String(p.id), rotulo: nomeDe(p) }))]}
+        .valor=${this.parcelamentoIndexado === null ? '' : String(this.parcelamentoIndexado)}
+        @urbi:select-change=${(e: CustomEvent) => {
+          const v = String(e.detail.valor ?? '');
+          void this._indexarParcelamento(v ? Number(v) : null);
+        }}></urbi-select>
+      ${this.indexando ? html`<p class="prop-meta">Lendo os ocupantes lote a lote…</p>` : nothing}
+
+      <urbi-tabela
+        clicavel
+        ?carregando=${this.carregando && this.moradores.length === 0}
+        mensagemVazio=${this.buscaMorador ? 'Nenhum morador com esse termo' : 'Nenhum morador'}
+        .colunas=${[
+          { id: 'nome', label: 'Nome', valor: (p: any) => String(p.pf_nome ?? p.nome ?? nomeDe(p)) },
+          { id: 'cpf', label: 'CPF', valor: (p: any) => String(p.cpf_formatado ?? p.pf_cpf ?? p.cpf ?? '—') },
+          { id: 'contatos', label: 'Contatos', render: (p: any) => this._renderContatos(p) },
+          { id: 'imoveis', label: 'Imóveis', render: (p: any) => this._renderImoveisDaPessoa(p) },
+          { id: 'situacao', label: 'Situação', render: (p: any) => this._renderSituacao(p) },
+        ]}
+        .linhas=${this.moradores}
+        @urbi:tabela-click=${(e: CustomEvent) => this._navegar(`/morador/${e.detail.linha.id}`)}
+      ></urbi-tabela>
+      ${this.moradoresPaginas > 1
+        ? html`<div class="barra-acoes">
+            <urbi-botao variante="fantasma" pequeno ?desabilitado=${this.moradoresPagina <= 1}
+              @click=${() => this._carregarMoradores(this.moradoresPagina - 1)}>Anterior</urbi-botao>
+            <span class="prop-meta">Página ${this.moradoresPagina} de ${this.moradoresPaginas}</span>
+            <urbi-botao variante="fantasma" pequeno ?desabilitado=${this.moradoresPagina >= this.moradoresPaginas}
+              @click=${() => this._carregarMoradores(this.moradoresPagina + 1)}>Próxima</urbi-botao>
+          </div>`
+        : nothing}
+    `;
+  }
+
+  private _nomeParcelamento(id: number | null): string {
+    const p = this.parcelamentos.find((x: any) => Number(x.id) === Number(id));
+    return p ? nomeDe(p) : `#${id}`;
+  }
+
+  private _renderContatos(p: any): TemplateResult {
+    const c = this.contatosPorPessoa.get(Number(p?.id));
+    if (!c) return html`<span class="prop-meta">…</span>`;
+    const partes = [
+      ...(c.telefones || []).map((t: any) => String(t.telefone_formatado ?? t.telefone)),
+      ...(c.emails || []).map((e: any) => String(e.email)),
+    ];
+    return partes.length === 0 ? html`—` : html`${partes.join(' · ')}`;
+  }
+
+  private _renderImoveisDaPessoa(p: any): TemplateResult {
+    if (this.parcelamentoIndexado === null) return html`<span class="prop-meta">—</span>`;
+    const lista = this.imoveisPorPessoa.get(Number(p?.id)) || [];
+    if (lista.length === 0) return html`<span class="prop-meta">nenhum neste parcelamento</span>`;
+    return html`<urbi-wrap>${lista.map(({ imovel, vinculo }) => html`
+      <urbi-badge cor="padrao">${nomeDe(imovel)}${vinculo?.tipo_vinculo
+        ? ` · ${ROTULO_VINCULO[vinculo.tipo_vinculo] ?? vinculo.tipo_vinculo}` : ''}</urbi-badge>`)}
+    </urbi-wrap>`;
+  }
+
+  private _renderSituacao(p: any): TemplateResult {
+    const s = this._situacaoDe(p);
+    const b = BADGE_SITUACAO[s.estado];
+    const titulo = s.estado === 'incompleto'
+      ? `Falta: ${s.faltando.join(', ')}`
+      : s.motivoIndeterminado ?? 'Cadastro completo';
+    return html`<urbi-badge cor=${b.cor} title=${titulo}>${b.rotulo}</urbi-badge>`;
+  }
+
+  /**
+   * Detalhe do morador. Existe para dar destino ao clique da lista — chip ou
+   * linha clicável sem destino é defeito, não adiantamento.
+   */
+  private _renderDetalheMorador(): TemplateResult {
+    const p = this.detalhe;
+    if (!p) return html`<urbi-loading></urbi-loading>`;
+    const s = this._situacaoDe(p);
+    const b = BADGE_SITUACAO[s.estado];
+    return html`
+      <urbi-botao variante="fantasma" icone="fa-solid fa-arrow-left" pequeno
+        @click=${() => this._navegar('/moradores')}>Voltar</urbi-botao>
+      <h2>${String(p.nome ?? nomeDe(p))}</h2>
+      <urbi-wrap>
+        <urbi-badge cor=${b.cor}>${b.rotulo}</urbi-badge>
+        ${s.estado === 'incompleto'
+          ? html`<span class="prop-meta">Falta: ${s.faltando.join(', ')}</span>`
+          : s.motivoIndeterminado
+            ? html`<span class="prop-meta">${s.motivoIndeterminado}</span>`
+            : nothing}
+      </urbi-wrap>
+      <urbi-wrap>
+        <urbi-kpi rotulo="CPF" .valor=${String(p.cpf_formatado ?? p.cpf ?? '—')} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Identificador" .valor=${String(p.id_legivel ?? `#${p.id}`)} formato="texto"></urbi-kpi>
+      </urbi-wrap>
+      <p class="secao-titulo">Contatos</p>
+      <p class="prop-meta">${this._renderContatos(p)}</p>
+      <p class="secao-titulo">Imóveis</p>
+      <p class="prop-meta">
+        ${this.parcelamentoIndexado === null
+          ? html`O Núcleo não expõe pessoa → imóveis. Indexe um parcelamento na
+              <a href=${urbiVerso.href('/moradores')} @click=${(e: Event) => { e.preventDefault(); this._navegar('/moradores'); }}>lista de moradores</a>
+              para ver os imóveis desta pessoa naquele recorte.`
+          : this._renderImoveisDaPessoa(p)}
+      </p>
     `;
   }
 
