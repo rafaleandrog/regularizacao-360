@@ -6,6 +6,14 @@ tipo:
 
 # Operação e deploy
 
+## Versão
+
+`manifesto.json` e `package.json` carregam a mesma versão, e **o workflow de release recusa a tag se ela não bater com o manifesto** — divergência entre os dois não passa despercebida.
+
+A versão atual é **0.9.0**. O salto de `0.1.1` não é cosmético: entre uma e outra, o app trocou o objeto de navegação, ganhou cinco tabelas, seis telas e a lógica pura que sustenta todas elas.
+
+**Por que não `1.0.0`:** o app ainda não rodou em instância nenhuma. `1.0.0` é o número **depois** do QA na Pinguim confirmar que ele funciona com o dado real — não antes. O `0.9` também espelha a linhagem da spec, que era v0.9 mirando a v1.0.
+
 ## Build e registro
 
 ```bash

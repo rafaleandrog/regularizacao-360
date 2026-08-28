@@ -1,6 +1,6 @@
 {
   "name": "@urbiverso/app-reg360",
-  "version": "0.1.1",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "description": "App UrbiVerso de Regularização Fundiária (Regularização 360)",
