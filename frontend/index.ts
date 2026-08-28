@@ -2,7 +2,7 @@ import { LitElement, html, css, nothing, type TemplateResult } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { urbiVerso } from './reg360-env.js';
 import { reg360Api, type Proposta, type Acao, type NovaAcao } from './reg360-api.js';
-import { falhaDeFlag, type FalhaDeFlag } from './nucleo-cliente.js';
+import { falhaDeFlag, invalidar as invalidarNucleo, type FalhaDeFlag } from './nucleo-cliente.js';
 import { filtrarPorTexto, normalizarTexto } from '../comum/busca.js';
 import { mapaComLimite } from '../comum/concorrencia.js';
 import { precoAplicavel, valorDoImovel, aplicarDescontos, type FormaPagamento } from '../comum/preco.js';
@@ -254,6 +254,10 @@ export class AppReg360 extends LitElement {
   @state() private imoveisPorPessoa = new Map<number, Array<{ imovel: any; vinculo: any }>>();
   @state() private parcelamentoIndexado: number | null = null;
   @state() private indexando = false;
+  /** Formulário de cadastro de morador. `null` = fechado. */
+  @state() private formMorador: Record<string, any> | null = null;
+  /** Resultado do último cadastro, para a tela dizer o que aconteceu passo a passo. */
+  @state() private ultimoCadastro: any = null;
   /** Lotes cuja leitura de ocupantes falhou — o recorte saiu incompleto. */
   @state() private lotesQueFalharam = 0;
 
@@ -582,6 +586,75 @@ export class AppReg360 extends LitElement {
       this.dadosDoImovel = await reg360Api.imovelDados(this.rota.view, this.rota.id) || {};
     } catch (e: any) {
       this._registrarFalha(e, 'Falha ao carregar preços do imóvel');
+    }
+  }
+
+  /**
+   * Abre o formulário. Vindo do detalhe do lote, o imóvel já vem preenchido —
+   * a tela sabe qual é, e pedir de novo seria mandar o usuário repetir.
+   */
+  private _abrirFormMorador(imovelId?: number) {
+    this.ultimoCadastro = null;
+    this.formMorador = {
+      nome: '', cpf: '', telefone: '', email: '',
+      imovel_id: imovelId ?? '',
+      tipo_vinculo: 'posse_legitima',
+      erroCampo: null,
+      erro: null,
+    };
+  }
+
+  /**
+   * Envia o cadastro. O app **não valida CPF, telefone nem email** — quem
+   * normaliza e recusa é o Núcleo, e reimplementar aqui criaria uma segunda
+   * verdade que diverge da dele. O que a tela faz é levar o erro DELE ao campo
+   * certo, porque erro genérico manda o usuário adivinhar.
+   */
+  private async _salvarMorador() {
+    const f = this.formMorador;
+    if (!f) return;
+    this.carregando = true;
+    this.formMorador = { ...f, erro: null, erroCampo: null };
+    try {
+      const corpo: any = { nome: f.nome, cpf: f.cpf };
+      if (String(f.telefone ?? '').trim()) corpo.telefone = f.telefone;
+      if (String(f.email ?? '').trim()) corpo.email = f.email;
+      if (String(f.imovel_id ?? '').trim()) {
+        corpo.imovel_id = Number(f.imovel_id);
+        corpo.tipo_vinculo = f.tipo_vinculo;
+      }
+      const r = await reg360Api.cadastrarMorador(corpo);
+      this.ultimoCadastro = r;
+      this.formMorador = null;
+      urbiVerso.notificar?.(
+        r?.parcial ? 'Cadastro parcial — veja o detalhe' : 'Morador cadastrado',
+        r?.parcial ? 'info' : 'sucesso',
+      );
+      // O cache do Núcleo guarda a lista antiga; sem invalidar, a pessoa recém
+      // criada não apareceria pelo resto da sessão.
+      invalidarNucleo('pessoas');
+      if (this.rota.view === 'moradores') await this._carregarMoradores(this.moradoresPagina);
+      if (this.rota.view === 'lote' && this.rota.id) {
+        invalidarNucleo('lotes');
+        this.pessoasPorLote = new Map();
+        await this._carregarPessoasDaPagina([{ id: this.rota.id }]);
+      }
+    } catch (e: any) {
+      const flag = falhaDeFlag(e);
+      if (flag) {
+        // Flag desligada não é erro de formulário: é o admin que não ligou o
+        // toggle. O banner explicável da tela cobre isso.
+        this.formMorador = null;
+        this.avisoFlag = flag;
+      } else {
+        this.formMorador = {
+          ...f,
+          erro: e?.message || 'Falha ao cadastrar',
+          erroCampo: e?.campo ?? null,
+        };
+      }
+    } finally {
+      this.carregando = false;
     }
   }
 
@@ -1184,6 +1257,7 @@ export class AppReg360 extends LitElement {
       ${this.formRegAberto ? this._renderFormRegularizacao() : nothing}
       ${this.formPreco ? this._renderFormPreco() : nothing}
       ${this.formAcao ? this._renderFormAcao() : nothing}
+      ${this.formMorador ? this._renderFormMorador() : nothing}
     `;
   }
 
@@ -1586,9 +1660,26 @@ export class AppReg360 extends LitElement {
       </urbi-wrap>
       ${this.podeAprovar ? this._renderBotaoQuitacao() : nothing}
       ${ocupantes.length > 0
-        ? html`<urbi-wrap>${ocupantes.map((v: any) =>
-            html`<urbi-badge cor="padrao">${v.nome ?? v.razao_social ?? `#${v.pessoa_id}`}${v.legado ? ' (legado)' : ''}</urbi-badge>`)}</urbi-wrap>`
+        ? html`<urbi-wrap>${ocupantes.map((v: any) => html`
+            <urbi-badge cor="padrao">${v.nome ?? v.razao_social ?? `#${v.pessoa_id}`}${v.legado ? ' (legado)' : ''}</urbi-badge>
+            ${this.podeCriar && ehLote && v.vinculo_id
+              ? html`<urbi-botao variante="fantasma" pequeno icone="fa-solid fa-link-slash"
+                  @click=${() => {
+                    if (!confirm(`Desvincular ${v.nome ?? 'esta pessoa'} deste lote?`)) return;
+                    void this._acaoPreco(
+                      () => reg360Api.desvincularMorador(Number(u.id), Number(v.vinculo_id)),
+                      'Morador desvinculado',
+                    ).then(() => { this.pessoasPorLote = new Map(); return this._carregarPessoasDaPagina([u]); });
+                  }}>Desvincular</urbi-botao>`
+              : nothing}`)}</urbi-wrap>`
         : html`<p class="prop-meta">Nenhum morador vinculado.</p>`}
+      ${this.podeCriar && ehLote
+        ? html`<div class="barra-acoes">
+            <urbi-botao variante="secundario" pequeno icone="fa-solid fa-user-plus"
+              @click=${() => this._abrirFormMorador(Number(u.id))}>Vincular morador</urbi-botao>
+          </div>`
+        : nothing}
+      ${this.ultimoCadastro ? this._renderResultadoCadastro() : nothing}
       ${this._renderPainelPrecos(u)}
       <urbi-wrap>
         <urbi-kpi rotulo="Área (m²)" .valor=${fmtArea(u.area_efetiva ?? u.area)} formato="texto"></urbi-kpi>
@@ -1650,6 +1741,13 @@ export class AppReg360 extends LitElement {
         A busca é do servidor, sobre nome e CPF — e, como ela é <code>ILIKE</code>,
         <strong>não cruza acento</strong>: procure <em>José</em>, não <em>jose</em>.
       </p>
+      ${this.podeCriar
+        ? html`<div class="barra-acoes">
+            <urbi-botao variante="primario" pequeno icone="fa-solid fa-user-plus"
+              @click=${() => this._abrirFormMorador()}>Cadastrar Morador</urbi-botao>
+          </div>`
+        : nothing}
+      ${this.ultimoCadastro ? this._renderResultadoCadastro() : nothing}
       <urbi-input label="Nome ou CPF" .valor=${this.buscaMorador}
         @urbi:input-change=${(e: CustomEvent) => { this.buscaMorador = String(e.detail.valor ?? ''); }}
         @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') buscar(); }}></urbi-input>
@@ -1834,6 +1932,94 @@ export class AppReg360 extends LitElement {
               para ver os imóveis desta pessoa naquele recorte.`
           : this._renderImoveisDaPessoa(p)}
       </p>
+    `;
+  }
+
+  /**
+   * O que aconteceu no cadastro, passo a passo.
+   *
+   * A operação **não é atômica** — são quatro chamadas ao Núcleo sem transação
+   * entre elas. Dizer só "cadastrado" esconderia o caso em que a pessoa foi
+   * criada e o telefone recusado. Aqui a tela mostra cada passo, e diz que
+   * reenviar o mesmo formulário retoma de onde parou.
+   */
+  private _renderResultadoCadastro(): TemplateResult {
+    const r = this.ultimoCadastro;
+    if (!r) return html`${nothing}`;
+    const passos = Object.entries(r.passos || {});
+    return html`
+      <urbi-banner variante=${r.parcial ? 'alerta' : 'sucesso'}>
+        ${r.reaproveitada
+          ? html`<strong>Pessoa já cadastrada foi reaproveitada</strong> — nada foi duplicado.<br>`
+          : nothing}
+        ${passos.map(([k, v]) => html`${k}: ${v}<br>`)}
+        ${r.parcial
+          ? html`<br><strong>Cadastro parcial.</strong> Reenviar o mesmo formulário retoma de onde parou —
+              a pessoa não é duplicada.`
+          : nothing}
+        <br><urbi-botao variante="fantasma" pequeno
+          @click=${() => { this.ultimoCadastro = null; }}>Fechar</urbi-botao>
+      </urbi-banner>
+    `;
+  }
+
+  /**
+   * Formulário de cadastro de morador.
+   *
+   * Não valida CPF, telefone nem email — quem normaliza e recusa é o Núcleo, e
+   * reimplementar aqui criaria uma segunda verdade que diverge da dele. O que a
+   * tela faz é levar o erro DELE ao campo certo.
+   */
+  private _renderFormMorador(): TemplateResult {
+    const f = this.formMorador!;
+    const set = (k: string, v: unknown) => { this.formMorador = { ...f, [k]: v }; };
+    const campo = (nome: string, label: string, dica = '') => html`
+      <urbi-input label=${label} .valor=${f[nome] ?? ''}
+        erro=${f.erroCampo === nome ? (f.erro ?? '') : ''}
+        @urbi:input-change=${(e: CustomEvent) => set(nome, e.detail.valor)}></urbi-input>
+      ${dica ? html`<p class="prop-meta">${dica}</p>` : nothing}`;
+    const veioDoLote = Boolean(f.imovel_id);
+    return html`
+      <urbi-modal title="Cadastrar morador" @urbi-modal:close=${() => { this.formMorador = null; }}>
+        ${f.erro && !f.erroCampo
+          ? html`<urbi-banner variante="erro">${f.erro}</urbi-banner>`
+          : nothing}
+        <p class="prop-meta">
+          CPF, telefone e email são validados e formatados <strong>pelo Núcleo</strong> —
+          digite como preferir. Se o CPF já existir, a pessoa é reaproveitada em vez de duplicada.
+        </p>
+        <div class="form-grid">
+          ${campo('nome', 'Nome completo')}
+          ${campo('cpf', 'CPF')}
+          ${campo('telefone', 'Telefone')}
+          ${campo('email', 'Email')}
+          ${veioDoLote
+            ? nothing
+            : campo('imovel_id', 'Lote (id)', 'Opcional. Sem lote, a pessoa é cadastrada sem vínculo.')}
+          ${f.imovel_id
+            ? html`<urbi-select label="Tipo de vínculo"
+                .opcoes=${[
+                  { valor: 'posse_legitima', rotulo: 'Posse legítima' },
+                  { valor: 'posse_ilegitima', rotulo: 'Posse ilegítima' },
+                  { valor: 'usuario', rotulo: 'Usuário' },
+                ]}
+                .valor=${f.tipo_vinculo}
+                @urbi:select-change=${(e: CustomEvent) => set('tipo_vinculo', e.detail.valor)}></urbi-select>`
+            : nothing}
+        </div>
+        ${veioDoLote
+          ? html`<p class="prop-meta">Vinculando ao lote <strong>#${f.imovel_id}</strong>, que já está aberto.</p>`
+          : nothing}
+        <p class="prop-meta">
+          O cadastro faz quatro escritas no Núcleo e <strong>não é atômico</strong>: se uma falhar,
+          a tela diz qual, e reenviar retoma de onde parou.
+        </p>
+        <div class="barra-acoes" style="margin-top:16px">
+          <urbi-botao variante="fantasma" @click=${() => { this.formMorador = null; }}>Cancelar</urbi-botao>
+          <urbi-botao variante="primario" ?carregando=${this.carregando}
+            @click=${() => this._salvarMorador()}>Cadastrar</urbi-botao>
+        </div>
+      </urbi-modal>
     `;
   }
 

@@ -209,6 +209,25 @@ export const reg360Api = {
   pessoas: (p?: { busca?: string; tipo?: string }, pagina = 1, porPagina = 50) =>
     nucleo.listarPagina('pessoas', (p || {}) as Record<string, unknown>, pagina, porPagina),
   pessoa: (id: number): Promise<any> => nucleo.buscar('pessoas', id),
+  /**
+   * Cadastrar morador — a única escrita do app no Núcleo.
+   *
+   * NÃO é atômico (quatro chamadas ao Núcleo, sem transação entre elas), mas é
+   * idempotente: reenviar o mesmo CPF retoma de onde parou. A resposta traz
+   * `passos` dizendo o que aconteceu em cada etapa, e `parcial: true` com
+   * status 207 quando algo ficou pelo caminho.
+   */
+  cadastrarMorador: (corpo: {
+    nome: string;
+    cpf: string;
+    telefone?: string;
+    email?: string;
+    imovel_id?: number;
+    tipo_vinculo?: string;
+  }): Promise<any> => urbiVerso.api('/moradores', JSON_POST(corpo)),
+  desvincularMorador: (loteId: number, vinculoId: number): Promise<any> =>
+    urbiVerso.api(`/moradores/desvincular/${loteId}/${vinculoId}`, JSON_POST(undefined)),
+
   /** Telefones e emails de uma PF — dois sub-recursos, uma requisição cada. */
   telefonesDaPessoa: (id: number): Promise<any[]> =>
     nucleo.listarSubRecurso('pessoas/fisicas', id, 'telefones'),

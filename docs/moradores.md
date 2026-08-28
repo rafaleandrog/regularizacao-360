@@ -68,8 +68,36 @@ Os lotes que falharam ficam **fora** do índice e são contados: o banner diz qu
 
 Contatos vêm por sub-recurso, **uma requisição por pessoa visível**, em janela de 6 simultâneos (`comum/concorrencia.ts`) — o Núcleo não expande contato na listagem, mesmo motivo dos ocupantes na tabela de lotes.
 
-## O que ainda não existe
+## Cadastrar morador — a única escrita do app no Núcleo
 
-**Cadastrar morador** (issue #34). É a única escrita do app no Núcleo, e depende de `req.nucleo.batch('pessoas_fisicas', …)` mais `chamarSubrecurso` para telefones, emails e o vínculo com o lote. Enquanto não entra, a tela não oferece o botão — botão que a API vai recusar é pior que botão ausente.
+`POST /api/reg360/moradores`, gate `criador` ou admin. O cliente manda um objeto só; a rota orquestra os quatro passos. Deixar o frontend encadear quatro chamadas espalharia a consistência pelo chamador e deixaria pessoa criada sem vínculo sempre que a última falhasse.
+
+### Não é atômico, e não dá para ser
+
+São quatro chamadas HTTP ao Núcleo — criar PF, telefone, email, vínculo — e **não existe transação entre elas**. A issue #34 pede "cria tudo ou nada"; isso não é implementável contra a API que existe, e prometê-lo seria uma mentira que só aparece no dia em que o terceiro passo falha.
+
+O que existe no lugar é melhor para quem usa:
+
+- **Idempotente e retomável.** Reenviar o mesmo CPF encontra a pessoa que já existe (`buscarPorChave`) e continua de onde parou. Nada é duplicado.
+- **A resposta diz o que aconteceu passo a passo**, e volta **207** quando algo ficou pelo caminho. Status 201 sobre um cadastro incompleto faria a tela dizer "cadastrado" sobre o que não está.
+- **`409` não é falha.** Contato ou vínculo que já existia é o caso normal ao reenviar.
+
+### O app não valida CPF, telefone nem email
+
+Quem normaliza e recusa é o Núcleo. Reimplementar aqui criaria uma segunda verdade que diverge da dele — e o dígito verificador do CPF é o exemplo clássico de regra que se copia errado.
+
+O que a tela faz é **levar o erro dele ao campo certo**: erro genérico manda o usuário adivinhar qual campo consertar.
+
+Uma exceção que não é exceção: o app extrai os **dígitos** do CPF para a busca de duplicata. Isso não é validar — é usar o formato **armazenado**. O Núcleo guarda só dígitos, então procurar por `099.775.791-48` não acharia `09977579148`, e o cadastro criaria a duplicata que a rota promete evitar. Na **criação**, o valor vai como o usuário digitou.
+
+### `tipo_vinculo` aparece na tela, com rótulos humanos
+
+`posse_legitima` / `posse_ilegitima` / `usuario` é distinção **jurídica** do Núcleo, relevante na regularização — não detalhe técnico a esconder.
+
+### Desvincular tem rota própria
+
+`POST /moradores/desvincular/:loteId/:vinculoId`, com confirmação na tela. Rota separada porque é a operação inversa: juntá-la ao cadastro faria um formulário de criação carregar poder de apagar.
+
+## O que ainda não existe
 
 **Aba de Ações na pessoa** (issue #32). Ação que existe só contra alguém, sem imóvel vinculado, ainda não aparece em tela nenhuma. Agora que a tela da pessoa existe, é ali que ela entra.
