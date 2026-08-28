@@ -132,6 +132,12 @@ export const reg360Api = {
     urbiVerso.api(`/imovel-dados/${tipo}/${id}/preco-estatico/corrigir`, JSON_POST({ preco_estatico: preco })),
   salvarPrecoManual: (tipo: string, id: number, preco: number | null): Promise<any> =>
     urbiVerso.api(`/imovel-dados/${tipo}/${id}/preco-manual`, JSON_POST({ preco_m2_manual: preco }, 'PUT')),
+  // Quitação tem rota própria porque tem GATE próprio: é constatação
+  // financeira (validador_interno), não cadastro (criador).
+  quitarImovel: (tipo: string, id: number): Promise<any> =>
+    urbiVerso.api(`/imovel-dados/${tipo}/${id}/quitar`, JSON_POST(undefined)),
+  desquitarImovel: (tipo: string, id: number): Promise<any> =>
+    urbiVerso.api(`/imovel-dados/${tipo}/${id}/desquitar`, JSON_POST(undefined)),
 
   // ---- Ações judiciais (tabelas do app) ----
   // Filtro por imóvel exige os DOIS campos: `imovel_id` sozinho devolveria as

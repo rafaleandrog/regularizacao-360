@@ -116,3 +116,51 @@ describe('vinculosConhecidos — ausência no índice parcial não é ausência 
     assert.equal(vinculosConhecidos(new Map(), 7), undefined);
   });
 });
+
+// ---------------------------------------------------------------------------
+
+import { semCamposProtegidos, lerQuitacao, CAMPOS_SO_POR_ROTA_PROPRIA } from '../../comum/quitacao.js';
+
+describe('semCamposProtegidos — rota descritiva não pula gate de rota dedicada', () => {
+  test('corpo normal passa', () => {
+    assert.deepEqual(semCamposProtegidos({ preco_m2_manual: 10, observacao: 'x' }), { ok: true });
+    assert.deepEqual(semCamposProtegidos({}), { ok: true });
+  });
+
+  test('quitado no corpo é RECUSADO, não ignorado', () => {
+    // Ignorar em silêncio deixaria o cliente achar que gravou.
+    const r = semCamposProtegidos({ preco_m2_manual: 10, quitado: true });
+    assert.ok('erro' in r);
+    assert.match((r as any).erro, /quitado/);
+  });
+
+  test('preço de contrato também é protegido — tem gate próprio', () => {
+    assert.ok('erro' in semCamposProtegidos({ preco_estatico: 100 }));
+  });
+
+  test('valor falsy não escapa: é a PRESENÇA da chave que conta', () => {
+    // `quitado: false` desmarcaria a quitação passando por baixo do gate.
+    assert.ok('erro' in semCamposProtegidos({ quitado: false }));
+    assert.ok('erro' in semCamposProtegidos({ preco_estatico: null }));
+  });
+
+  test('todos os campos protegidos são acusados de uma vez', () => {
+    const corpo = Object.fromEntries(CAMPOS_SO_POR_ROTA_PROPRIA.map((c) => [c, 1]));
+    const r = semCamposProtegidos(corpo);
+    assert.ok('erro' in r);
+    for (const c of CAMPOS_SO_POR_ROTA_PROPRIA) assert.match((r as any).erro, new RegExp(c));
+  });
+});
+
+describe('lerQuitacao', () => {
+  test('registro inexistente é NÃO QUITADO, não desconhecido', () => {
+    // A maioria dos imóveis nunca foi editada e não tem linha na tabela.
+    assert.deepEqual(lerQuitacao(null), { quitado: false, em: null, porNome: null });
+    assert.deepEqual(lerQuitacao({}), { quitado: false, em: null, porNome: null });
+  });
+
+  test('quitado traz data e autor junto', () => {
+    const q = lerQuitacao({ quitado: true, quitado_em: '2026-08-28', quitado_por_nome: 'Ana' });
+    assert.deepEqual(q, { quitado: true, em: '2026-08-28', porNome: 'Ana' });
+  });
+});

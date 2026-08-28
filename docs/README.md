@@ -57,6 +57,10 @@ Lista de pessoas do Núcleo, com busca de servidor. A coluna de imóveis depende
 
 Sobre imóveis **e/ou** pessoas, com o polo (`UP contra` / `contra UP`) guardado como dado e o título montado de uma função só. Ver [acoes.md](acoes).
 
+## Quitação
+
+Marca, não cálculo — o app registra que alguém constatou, com autoria e data. Gate de `validador_interno`, rota própria, e uma guarda que impede rota descritiva de escrever o campo. Ver [quitacao.md](quitacao).
+
 ## Preços
 
 Precedência: **contrato gravado** → **preço manual** → **proposta vigente** em cascata. O de contrato é imutável de propósito — ver [precos.md](precos).

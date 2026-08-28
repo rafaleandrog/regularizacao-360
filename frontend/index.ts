@@ -15,6 +15,7 @@ import {
   FASES, SITUACOES_REGISTRAIS,
 } from '../comum/regularizacao.js';
 import { soData, hoje, statusVigencia, type StatusVigencia } from '../comum/cascata.js';
+import { lerQuitacao } from '../comum/quitacao.js';
 import {
   situacaoCadastro,
   indexarPorPessoa,
@@ -232,6 +233,8 @@ export class AppReg360 extends LitElement {
   @state() private buscaMorador = '';
   /** Mostrar só quem tem falta COMPROVADA — o uso prático da coluna Situação. */
   @state() private soIncompletos = false;
+  /** Filtro de quitação na tabela de lotes: o índice `(imovel_tipo, quitado)` existe para isto. */
+  @state() private filtroQuitacao: 'todos' | 'quitados' | 'nao_quitados' = 'todos';
   @state() private contatosPorPessoa = new Map<number, { telefones: any[]; emails: any[] }>();
   /**
    * Imóveis por pessoa. Só existe para o parcelamento que o usuário escolheu
@@ -806,6 +809,40 @@ export class AppReg360 extends LitElement {
     );
   }
 
+  /** Estado de quitação do imóvel aberto. Sem registro = não quitado. */
+  private get _quitacao() {
+    return lerQuitacao(this.dadosDoImovel);
+  }
+
+  /**
+   * Botão de quitação. Só quem aprova proposta vê — quitação é constatação
+   * financeira, não cadastro, e `criador` tomaria 403 se clicasse.
+   *
+   * Desmarcar pede confirmação: a marca é o registro de que alguém afirmou que
+   * a dívida acabou, e desfazê-la por engano apaga essa afirmação junto com a
+   * autoria.
+   */
+  private _renderBotaoQuitacao(): TemplateResult {
+    const q = this._quitacao;
+    const tipo = this.rota.view;
+    const id = Number(this.rota.id);
+    return html`
+      <div class="barra-acoes">
+        ${q.quitado
+          ? html`<urbi-botao variante="perigo" pequeno icone="fa-solid fa-rotate-left"
+              ?carregando=${this.carregando}
+              @click=${() => {
+                if (!confirm('Desmarcar a quitação apaga a data e o autor do registro. Continuar?')) return;
+                void this._acaoPreco(() => reg360Api.desquitarImovel(tipo, id), 'Quitação desmarcada');
+              }}>Desmarcar quitação</urbi-botao>`
+          : html`<urbi-botao variante="sucesso" pequeno icone="fa-solid fa-circle-check"
+              ?carregando=${this.carregando}
+              @click=${() => this._acaoPreco(() => reg360Api.quitarImovel(tipo, id), 'Imóvel marcado como quitado')}>
+              Marcar como quitado</urbi-botao>`}
+      </div>
+    `;
+  }
+
   /** Preço que vale para o imóvel aberto, com a origem. */
   private get _precoDoImovel() {
     return precoAplicavel(this.dadosDoImovel, this.vigente?.vigente);
@@ -827,6 +864,21 @@ export class AppReg360 extends LitElement {
 
   /** Lotes visíveis na página atual, já filtrados. */
   private get _lotesFiltrados(): any[] {
+    const porQuitacao = (lista: any[]) => {
+      if (this.filtroQuitacao === 'todos') return lista;
+      const querQuitado = this.filtroQuitacao === 'quitados';
+      // O dado de quitação vem da tabela do app, indexada por (tipo, id) — a
+      // mesma base que o VGV já carrega. Lote sem registro é não quitado, que
+      // é o caso normal e não "desconhecido".
+      return lista.filter((l) => {
+        const d = this.precosPorImovel.get(chaveImovel(l?.id, 'lote'));
+        return Boolean(d?.quitado) === querQuitado;
+      });
+    };
+    return porQuitacao(this._lotesPorBusca);
+  }
+
+  private get _lotesPorBusca(): any[] {
     if (this.modoBusca === 'morador') {
       const alvo = normalizarTexto(this.termoBusca);
       if (!alvo) return this.lotes;
@@ -1378,7 +1430,24 @@ export class AppReg360 extends LitElement {
           ativo=${this.modoBusca}
           @urbi:chip-atalho:click=${(e: CustomEvent) => this._trocarModoBusca(e.detail.id)}
         ></urbi-chips-atalho>
+        <urbi-chips-atalho
+          .opcoes=${[
+            { id: 'todos', rotulo: 'Todos' },
+            { id: 'quitados', rotulo: 'Quitados' },
+            { id: 'nao_quitados', rotulo: 'Não quitados' },
+          ]}
+          ativo=${this.filtroQuitacao}
+          @urbi:chip-atalho:click=${(e: CustomEvent) => {
+            this.filtroQuitacao = e.detail.id;
+            this.paginaLotes = 1;
+          }}
+        ></urbi-chips-atalho>
       </urbi-wrap>
+      ${this.filtroQuitacao !== 'todos' && !this.basesDoVgvCarregadas
+        ? html`<p class="prop-meta">
+            Carregando os dados de quitação — o filtro usa a mesma base do VGV.
+          </p>`
+        : nothing}
       <urbi-input
         label=${this.modoBusca === 'morador' ? 'Nome do morador' : 'Endereço (quadra, conjunto, rua, lote)'}
         .valor=${this.termoBusca}
@@ -1453,7 +1522,11 @@ export class AppReg360 extends LitElement {
           const b = badgeAcao(a);
           return html`<urbi-badge cor=${b.cor}>${b.rotulo}</urbi-badge>`;
         })}
+        ${this._quitacao.quitado
+          ? html`<urbi-badge cor="sucesso">Quitado${this._quitacao.em ? ` em ${soData(this._quitacao.em)}` : ''}${this._quitacao.porNome ? ` · ${this._quitacao.porNome}` : ''}</urbi-badge>`
+          : nothing}
       </urbi-wrap>
+      ${this.podeAprovar ? this._renderBotaoQuitacao() : nothing}
       ${ocupantes.length > 0
         ? html`<urbi-wrap>${ocupantes.map((v: any) =>
             html`<urbi-badge cor="padrao">${v.nome ?? v.razao_social ?? `#${v.pessoa_id}`}${v.legado ? ' (legado)' : ''}</urbi-badge>`)}</urbi-wrap>`

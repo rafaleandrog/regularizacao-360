@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { proximaPagina } from '../comum/paginacao.js';
 import { upsertPorChave } from './upsert.js';
+import { semCamposProtegidos } from '../comum/quitacao.js';
 
 /**
  * Rotas de `imovel_dados` — dados que a UP mantém por imóvel e que não existem
@@ -29,6 +30,14 @@ function ehAdmin(req: any): boolean {
 }
 function podeCriar(req: any): boolean {
   return ehAdmin(req) || (req.contexto?.rolesApp || []).includes('criador');
+}
+/**
+ * Quitação é **constatação financeira**, não cadastro — o mesmo perfil que
+ * aprova proposta. `criador` cadastra dado; quem afirma que a dívida acabou é
+ * quem tem alçada para isso.
+ */
+function podeQuitar(req: any): boolean {
+  return ehAdmin(req) || (req.contexto?.rolesApp || []).includes('validador_interno');
 }
 
 function lerAlvo(req: any): { imovelId: number; imovelTipo: string } | { erro: string } {
@@ -176,6 +185,11 @@ rotasImovelDados.put('/imovel-dados/:tipo/:id/preco-manual', async (req, res) =>
     const alvo = lerAlvo(req);
     if ('erro' in alvo) return erro(res, 400, 'REG360_PARAMS_INVALIDOS', alvo.erro);
 
+    // Corpo que tenta escrever `quitado` ou `preco_estatico` por aqui é
+    // recusado, não ignorado: rota descritiva não pula gate de rota dedicada.
+    const limpo = semCamposProtegidos(req.body || {});
+    if ('erro' in limpo) return erro(res, 400, 'REG360_CAMPO_PROTEGIDO', limpo.erro);
+
     const preco = precoValido(req.body?.preco_m2_manual);
     if (preco !== null && typeof preco === 'object') return erro(res, 400, 'REG360_DADOS_INVALIDOS', preco.erro);
 
@@ -186,3 +200,55 @@ rotasImovelDados.put('/imovel-dados/:tipo/:id/preco-manual', async (req, res) =>
     erro(res, 422, 'REG360_SALVAR_FALHOU', err?.message || 'Falha ao salvar preço manual');
   }
 });
+
+// ---------------------------------------------------------------------------
+// Quitação
+// ---------------------------------------------------------------------------
+//
+// Marca, não cálculo. O saldo devedor vive na base do financeiro, fora do
+// escopo do app: aqui se registra que alguém CONSTATOU a quitação — e por isso
+// quem e quando são gravados junto. Marca sem autoria não responde a única
+// pergunta que alguém vai fazer depois: "quem disse que estava quitado?".
+//
+// Rota dedicada, separada do PUT descritivo: quitação não é campo que se edita
+// de passagem no mesmo formulário do resto.
+
+async function alternarQuitacao(req: any, res: any, quitar: boolean) {
+  try {
+    if (!podeQuitar(req)) {
+      return erro(res, 403, 'SEM_PERMISSAO',
+        'Apenas validadores internos podem registrar quitação');
+    }
+    const alvo = lerAlvo(req);
+    if ('erro' in alvo) return erro(res, 400, 'REG360_PARAMS_INVALIDOS', alvo.erro);
+
+    const atual = await buscarDados(req, alvo.imovelId, alvo.imovelTipo);
+    const jaEsta = Boolean(atual?.quitado) === quitar;
+    // Idempotente de propósito: repetir a ação não é conflito, é o mesmo
+    // desfecho. 409 aqui só faria a tela tratar erro que não é erro.
+    if (jaEsta) {
+      return res.json({ ...(atual ?? {}), ok: true, [quitar ? 'ja_quitado' : 'ja_nao_quitado']: true });
+    }
+
+    // Desmarcar limpa autoria e data junto: deixá-las apontando para a
+    // marcação anterior faria a tela dizer "quitado por Fulano" sobre um imóvel
+    // que não está quitado.
+    const salvo = await salvar(req, alvo.imovelId, alvo.imovelTipo, {
+      quitado: quitar,
+      quitado_em: quitar ? hojeISO() : null,
+      quitado_por_id: quitar ? (req.contexto?.usuario?.id ?? null) : null,
+    });
+    res.json({ ...(salvo ?? {}), ok: true });
+  } catch (err: any) {
+    erro(res, 422, 'REG360_SALVAR_FALHOU', err?.message || 'Falha ao registrar quitação');
+  }
+}
+
+// POST /api/reg360/imovel-dados/:tipo/:id/quitar
+rotasImovelDados.post('/imovel-dados/:tipo/:id/quitar', (req, res) => alternarQuitacao(req, res, true));
+
+// POST /api/reg360/imovel-dados/:tipo/:id/desquitar
+//
+// Existe porque marca irreversível vira dado errado permanente no primeiro
+// clique por engano — e ninguém confia numa marca que não dá para desfazer.
+rotasImovelDados.post('/imovel-dados/:tipo/:id/desquitar', (req, res) => alternarQuitacao(req, res, false));
