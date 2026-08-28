@@ -43,6 +43,29 @@ Criar a partir do lote já vem com o lote vinculado — a tela não pede ao usu�
 
 Remover é soft delete, e leva os vínculos junto: vínculo órfão apontando para ação removida reapareceria em qualquer contagem por imóvel ou por pessoa.
 
+## Duas paginações, uma ordem
+
+`GET /acoes` pagina de dois jeitos, e a diferença é imposta pelo framework: ele **não faz junção entre tabelas do app**, e o filtro por imóvel ou por pessoa mora na tabela de vínculo.
+
+- **Sem filtro de vínculo** → a paginação é do banco. Pede-se a página e pronto.
+- **Com filtro de vínculo** → acham-se os `acao_id` no vínculo, varre-se `acoes`, filtra-se e fatia-se em memória. Aí `total` e `paginas` são **calculados aqui**, não ecoados do banco: os do banco contariam as ações que o vínculo excluiu.
+
+Os três caminhos (banco, filtrado, vazio) devolvem o **mesmo envelope** — `dados`, `total`, `pagina`, `por_pagina`, `paginas` —, montado numa função só. Repassar cru o que o framework devolve faria o mesmo cliente receber formatos diferentes ao pôr ou tirar um filtro de vínculo, e `por_pagina` sumiria quando o framework não o ecoa.
+
+### A ordem é por `id`, e isso é deliberado
+
+Ordenar por `data` — o que a tela quer — **não define a ordem entre empates**, e empate é comum: `data` é opcional, então várias ações ficam `null`. Com `LIMIT`/`OFFSET` diferentes o banco pode devolver as empatadas em posições distintas, e aí páginas **repetem ou omitem** registros, sem erro nenhum.
+
+`id` é único, então a ordem é total. O custo é a lista sair por ordem de **cadastro**, não pela data do processo: uma ação registrada hoje com data de 2020 aparece no topo. É um preço barato — cada card mostra a sua data — perto de uma paginação que perde linhas. Ordem composta (`data DESC, id DESC`) resolveria os dois, mas o `ordenar` do SDK publicado recebe uma coluna.
+
+### A varredura tem teto próprio, e falha em vez de truncar
+
+`proximaPagina` carrega o teto de 200 páginas do **Núcleo** — guarda contra laço infinito, não limite de negócio. Reusá-lo na varredura das tabelas do app cortaria em silêncio um conjunto legítimo, e `total`/`paginas` passariam a mentir.
+
+Por isso `varrer()` não usa `proximaPagina`: tem os seus próprios sinais de parada e um teto de 50.000 registros que, ao ser batido, devolve **`413 REG360_CONSULTA_GRANDE_DEMAIS`**. Erro explícito é melhor que meia resposta com cara de resposta inteira.
+
+Buscar os vínculos de uma página tem o mesmo dilema — o framework não filtra por lista de ids. Até 10 ações vale uma requisição por ação, em janela de 6 simultâneos (`comum/concorrencia.ts`); acima disso, uma varredura só sai mais barata que a enxurrada. O detalhe de **uma** ação sempre filtra por `acao_id`, que é o índice da tabela.
+
 ## Filtro por imóvel exige os dois campos
 
 `imovel_id` sozinho é `400`. Sem o tipo, o filtro devolveria as ações do **lote 5 e da unidade 5** — objetos diferentes com o mesmo número. Filtro pela metade é pior que filtro ausente: o resultado tem cara de certo.
