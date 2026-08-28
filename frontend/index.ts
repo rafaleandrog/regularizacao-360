@@ -230,6 +230,8 @@ export class AppReg360 extends LitElement {
   @state() private moradoresPaginas = 1;
   @state() private moradoresTotal = 0;
   @state() private buscaMorador = '';
+  /** Mostrar só quem tem falta COMPROVADA — o uso prático da coluna Situação. */
+  @state() private soIncompletos = false;
   @state() private contatosPorPessoa = new Map<number, { telefones: any[]; emails: any[] }>();
   /**
    * Imóveis por pessoa. Só existe para o parcelamento que o usuário escolheu
@@ -1552,18 +1554,39 @@ export class AppReg360 extends LitElement {
         }}></urbi-select>
       ${this.indexando ? html`<p class="prop-meta">Lendo os ocupantes lote a lote…</p>` : nothing}
 
+      <urbi-wrap>
+        <urbi-chips-atalho
+          .opcoes=${[
+            { id: 'todos', rotulo: 'Todos' },
+            { id: 'incompletos', rotulo: 'Só cadastros incompletos' },
+          ]}
+          ativo=${this.soIncompletos ? 'incompletos' : 'todos'}
+          @urbi:chip-atalho:click=${(e: CustomEvent) => { this.soIncompletos = e.detail.id === 'incompletos'; }}
+        ></urbi-chips-atalho>
+      </urbi-wrap>
+      ${this.soIncompletos
+        ? html`<p class="prop-meta">
+            ${this._moradoresVisiveis.length} de ${this.moradores.length} nesta página têm falta
+            <strong>comprovada</strong>. Quem está com situação indeterminada fica de fora: pode
+            estar certo, e mandar conferir o que talvez não esteja quebrado torna a lista inútil.
+          </p>`
+        : nothing}
+
       <urbi-tabela
         clicavel
         ?carregando=${this.carregando && this.moradores.length === 0}
-        mensagemVazio=${this.buscaMorador ? 'Nenhum morador com esse termo' : 'Nenhum morador'}
+        mensagemVazio=${this.soIncompletos
+          ? 'Nenhum cadastro com falta comprovada nesta página'
+          : this.buscaMorador ? 'Nenhum morador com esse termo' : 'Nenhum morador'}
         .colunas=${[
           { id: 'nome', label: 'Nome', valor: (p: any) => String(p.pf_nome ?? p.nome ?? nomeDe(p)) },
           { id: 'cpf', label: 'CPF', valor: (p: any) => String(p.cpf_formatado ?? p.pf_cpf ?? p.cpf ?? '—') },
-          { id: 'contatos', label: 'Contatos', render: (p: any) => this._renderContatos(p) },
+          { id: 'telefone', label: 'Telefone', render: (p: any) => this._renderTelefones(p) },
+          { id: 'email', label: 'Email', render: (p: any) => this._renderEmails(p) },
           { id: 'imoveis', label: 'Imóveis', render: (p: any) => this._renderImoveisDaPessoa(p) },
           { id: 'situacao', label: 'Situação', render: (p: any) => this._renderSituacao(p) },
         ]}
-        .linhas=${this.moradores}
+        .linhas=${this._moradoresVisiveis}
         @urbi:tabela-click=${(e: CustomEvent) => this._navegar(`/morador/${e.detail.linha.id}`)}
       ></urbi-tabela>
       ${this.moradoresPaginas > 1
@@ -1578,9 +1601,42 @@ export class AppReg360 extends LitElement {
     `;
   }
 
+  /**
+   * Moradores visíveis. O filtro de incompletos roda no CLIENTE, sobre a página
+   * já carregada — o Núcleo não tem como filtrar por uma regra que é da app, e
+   * ela depende de contatos que vêm por sub-recurso.
+   *
+   * Por isso ele filtra `incompleto`, e **não** `indeterminado`: só entra quem
+   * tem falta comprovada. Varrer os indeterminados para dentro faria a lista
+   * de "conserte estes" incluir cadastros que talvez estejam certos.
+   */
+  private get _moradoresVisiveis(): any[] {
+    if (!this.soIncompletos) return this.moradores;
+    return this.moradores.filter((p) => this._situacaoDe(p).estado === 'incompleto');
+  }
+
   private _nomeParcelamento(id: number | null): string {
     const p = this.parcelamentos.find((x: any) => Number(x.id) === Number(id));
     return p ? nomeDe(p) : `#${id}`;
+  }
+
+  /**
+   * Telefone e email em colunas separadas, como no legado — é assim que se vê
+   * de relance QUAL contato falta. `…` enquanto o sub-recurso não voltou: não
+   * é `—`, porque ainda não se sabe.
+   */
+  private _renderTelefones(p: any): TemplateResult {
+    const c = this.contatosPorPessoa.get(Number(p?.id));
+    if (!c) return html`<span class="prop-meta">…</span>`;
+    const lista = (c.telefones || []).map((t: any) => String(t.telefone_formatado ?? t.telefone));
+    return lista.length === 0 ? html`<span class="prop-meta">—</span>` : html`${lista.join(' · ')}`;
+  }
+
+  private _renderEmails(p: any): TemplateResult {
+    const c = this.contatosPorPessoa.get(Number(p?.id));
+    if (!c) return html`<span class="prop-meta">…</span>`;
+    const lista = (c.emails || []).map((e: any) => String(e.email));
+    return lista.length === 0 ? html`<span class="prop-meta">—</span>` : html`${lista.join(' · ')}`;
   }
 
   private _renderContatos(p: any): TemplateResult {

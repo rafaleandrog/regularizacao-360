@@ -52,6 +52,14 @@ A lista de Parcelamentos filtra **no cliente**; a de Moradores, **no servidor**.
 
 O preço é o conhecido: o `busca` é `ILIKE`, então **não cruza acento** — quem digita `jose` não acha `José`. A tela avisa isso em vez de deixar o usuário concluir que a pessoa não existe.
 
+## O filtro de incompletos exclui os indeterminados
+
+O uso prático da coluna Situação é achar quem precisa de conserto — daí o chip **"Só cadastros incompletos"**. Ele filtra `incompleto`, e **não** `indeterminado`.
+
+A distinção é a razão de existir do terceiro estado: varrer os indeterminados para dentro faria a lista de "conserte estes" incluir cadastros que talvez já estejam certos, e uma lista de tarefas com falso positivo é uma lista que ninguém usa.
+
+O filtro roda no **cliente**, sobre a página carregada: a regra é da app, não do Núcleo, e depende dos contatos que vêm por sub-recurso. A tela diz quantos de quantos, para o número não parecer o total da instância.
+
 ## Lote que falha não é lote vazio
 
 Ao indexar, cada lote é uma requisição, e algumas falham. Tratar a falha como "este lote não tem ocupante" esconderia moradores reais **e** apresentaria o recorte como completo — a tela diria "nenhum imóvel" para quem tem um.
