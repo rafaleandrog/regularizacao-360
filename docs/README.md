@@ -34,6 +34,7 @@ Toda leitura passa por `frontend/nucleo-cliente.ts`, que pagina em laço, memori
 | `/parcelamentos/setor/:id` | A mesma lista, filtrada por Setor |
 | `/parcelamentos/fase/:fase` | A mesma lista, filtrada por fase de regularização |
 | `/parcelamento/:id` | Detalhe do Parcelamento — KPIs, abas Lotes e Propostas |
+| `/lotes` | Lista de Lotes da instância, com busca e paginação **de servidor** |
 | `/lote/:id` | Detalhe do Lote |
 | `/moradores` | Lista de Moradores, com busca de servidor |
 | `/morador/:id` | Detalhe do Morador |
@@ -43,6 +44,12 @@ Toda leitura passa por `frontend/nucleo-cliente.ts`, que pagina em laço, memori
 O filtro de Setor vai **na sub-rota**, não em query string: `subRota()` do shell é montada só do `pathname`, então `?setor=2` não chegaria à app. Como está, a tela filtrada é compartilhável e o botão voltar do navegador funciona.
 
 O termo de busca **não** entra na rota — é transitório por decisão, para não poluir o histórico a cada tecla.
+
+**A aba de topo é Lotes, não Unidades.** Até a v0.9.0 o nav trazia uma entrada `/unidades` herdada da spec v0.9, que listava `GET /unidades` sem filtro. No Núcleo, `unidades.incorporacao_id` é NOT NULL — unidade só existe sob incorporação — e o inventário real da instância são os ~6.200 lotes. A aba, portanto, só sabia ficar vazia, enquanto o objeto de navegação do app (o Lote) não tinha entrada nenhuma. `/unidade/:id` continua existindo, alcançada pelo detalhe do lote.
+
+A lista de Lotes **pagina e busca no servidor**: `GET /lotes` aceita `busca` (ILIKE sobre `numero_lote`, `quadra`, `conjunto` e `rua`) e devolve `total`. Varrer 6.200 registros para exibir 25 linhas seriam 32 requisições por tela.
+
+**O detalhe do Setor explica a tabela vazia.** Se o recorte por `setor_habitacional_id` volta sem nada, a tela diz qual dos casos é: não há parcelamento neste setor (e informa quantos a instância tem), ou não há parcelamento nenhum. `setor_habitacional_id` é nullable no Núcleo, então parcelamento sem setor aparece em `/parcelamentos` e em setor nenhum — tabela muda não distinguiria isso de base que não carregou.
 
 ## Regularização do Parcelamento
 

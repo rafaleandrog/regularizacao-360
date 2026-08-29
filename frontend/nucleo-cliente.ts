@@ -5,6 +5,12 @@ import {
   POR_PAGINA_NUCLEO,
   type PaginaNucleo,
 } from '../comum/paginacao.js';
+import {
+  conferirFiltros,
+  linhasDaPagina,
+  linhasForaDoFiltro,
+  ErroDeFiltro,
+} from '../comum/nucleo-filtros.js';
 
 /**
  * Cliente de leitura do Núcleo.
@@ -110,8 +116,34 @@ export function listarPagina<T = any>(
   porPagina = POR_PAGINA_NUCLEO,
 ): Promise<PaginaNucleo<T>> {
   const chave = chaveCache(recurso, { ...filtros, pagina, por_pagina: porPagina });
-  return memorizar(chave, () =>
-    urbiVerso.nucleo(comQuery(recurso, { ...filtros, pagina, por_pagina: porPagina })),
+  return memorizar(chave, async () => {
+    conferirFiltros(recurso, filtros);
+    const resposta: PaginaNucleo<T> = await urbiVerso.nucleo(
+      comQuery(recurso, { ...filtros, pagina, por_pagina: porPagina }),
+    );
+    exigirRecorte(recurso, filtros, linhasDaPagina<T>(resposta, recurso));
+    return resposta;
+  });
+}
+
+/**
+ * Recusa a página cujas linhas não são do recorte pedido.
+ *
+ * `conferirFiltros` já barra o filtro que sabemos que o Núcleo ignora; esta é a
+ * segunda guarda, contra o que **não** sabemos — allowlist que mudou do outro
+ * lado sem esta tabela acompanhar. Sem ela a app mostraria dado da instância
+ * inteira como se fosse do recorte, que é o modo de falhar deste contrato.
+ */
+function exigirRecorte(
+  recurso: string,
+  filtros: Record<string, unknown>,
+  linhas: readonly unknown[],
+): void {
+  const fora = linhasForaDoFiltro(filtros, linhas);
+  if (fora === 0) return;
+  throw new ErroDeFiltro(
+    `GET /${recurso} devolveu ${fora} de ${linhas.length} linhas fora do recorte pedido ` +
+      '— o Núcleo ignorou o filtro. Reconfira a allowlist em comum/nucleo-filtros.ts.',
   );
 }
 
@@ -124,13 +156,16 @@ export function listarTudo<T = any>(
   filtros: Record<string, unknown> = {},
 ): Promise<T[]> {
   return memorizar(chaveCache(recurso, filtros), async () => {
+    conferirFiltros(recurso, filtros);
     const acumulado: T[] = [];
     let pagina: number | null = 1;
     while (pagina !== null) {
       const resposta: PaginaNucleo<T> = await urbiVerso.nucleo(
         comQuery(recurso, { ...filtros, pagina, por_pagina: POR_PAGINA_NUCLEO }),
       );
-      acumulado.push(...(resposta?.dados || []));
+      const linhas = linhasDaPagina<T>(resposta, recurso);
+      exigirRecorte(recurso, filtros, linhas);
+      acumulado.push(...linhas);
       pagina = proximaPagina(resposta, pagina, acumulado.length);
     }
     return acumulado;

@@ -71,6 +71,8 @@ const NIVEL_LABEL: Record<string, string> = {
  * número de requisições por virada.
  */
 const LOTES_POR_PAGINA = 25;
+/** Lista global de lotes: pagina no servidor, então o tamanho é o do pedido. */
+const LOTES_GLOBAIS_POR_PAGINA = 25;
 
 /** Requisições simultâneas ao buscar ocupantes. Janela, não enxurrada. */
 const LIMITE_SIMULTANEO = 6;
@@ -113,7 +115,7 @@ function nomeDe(o: any): string {
 }
 
 interface Rota {
-  view: 'home' | 'parcelamentos' | 'unidades' | 'moradores' | 'setor' | 'parcelamento' | 'lote' | 'unidade' | 'proposta' | 'morador';
+  view: 'home' | 'parcelamentos' | 'lotes' | 'moradores' | 'setor' | 'parcelamento' | 'lote' | 'unidade' | 'proposta' | 'morador';
   id: number | null;
   /**
    * Filtro de Setor da lista de Parcelamentos. Vai na sub-rota
@@ -141,7 +143,7 @@ function parseRota(sub: string): Rota {
         filtroFase: fase,
       };
     }
-    case 'unidades': return { view: 'unidades', id: null };
+    case 'lotes': return { view: 'lotes', id: null };
     case 'moradores': return { view: 'moradores', id: null };
     case 'morador': return { view: 'morador', id };
     case 'setor': return { view: 'setor', id };
@@ -182,7 +184,16 @@ export class AppReg360 extends LitElement {
 
   @state() private setores: any[] = [];
   @state() private parcelamentos: any[] = [];
-  @state() private unidades: any[] = [];
+  // Lista global de Lotes (aba de topo). Pagina no SERVIDOR — são ~6.200, e
+  // `GET /lotes` busca em numero_lote, quadra, conjunto e rua. Varrer tudo para
+  // mostrar 25 linhas seria 32 requisições por tela.
+  @state() private lotesGlobais: any[] = [];
+  @state() private totalLotesGlobais = 0;
+  @state() private paginaLotesGlobais = 1;
+  @state() private buscaLotesGlobais = '';
+  // Quantos parcelamentos a instância tem, lido só quando o recorte do setor
+  // volta vazio — é o que separa "este setor não tem" de "não há nenhum".
+  @state() private totalParcelamentosInstancia: number | null = null;
 
   @state() private detalhe: any = null;
   @state() private propostas: Proposta[] = [];
@@ -338,6 +349,9 @@ export class AppReg360 extends LitElement {
   private async _carregar() {
     this.erro = null;
     this.avisoFlag = null;
+    // Sem o reset, a contagem lida no setor anterior sobreviveria a uma carga
+    // que falha, e a tela afirmaria sobre uma base que ela não leu.
+    this.totalParcelamentosInstancia = null;
     this.carregando = true;
     try {
       switch (this.rota.view) {
@@ -357,8 +371,8 @@ export class AppReg360 extends LitElement {
           this.parcelamentos = await reg360Api.parcelamentos();
           void this._varrerLotes();
           break;
-        case 'unidades':
-          this.unidades = await reg360Api.unidades();
+        case 'lotes':
+          await this._carregarLotesGlobais(1);
           break;
         case 'moradores':
           // Parcelamentos vêm junto porque o seletor de recorte do índice sai
@@ -377,6 +391,12 @@ export class AppReg360 extends LitElement {
             this.abaDetalhe = 'empreendimentos';
             this.detalhe = await reg360Api.setor(this.rota.id);
             this.parcelamentos = await reg360Api.parcelamentos({ setor_habitacional_id: this.rota.id });
+            // Recorte vazio é ambíguo: pode não haver parcelamento NESTE setor,
+            // ou a instância inteira estar vazia. Só a segunda leitura separa os
+            // dois — são ~60 registros, e o cache do cliente já a divide com a
+            // lista de Parcelamentos. Tabela muda não explica nada a ninguém.
+            this.totalParcelamentosInstancia =
+              this.parcelamentos.length > 0 ? null : (await reg360Api.parcelamentos()).length;
             await this._carregarPropostas('setor', this.rota.id);
             void this._varrerLotes();
           }
@@ -1246,7 +1266,7 @@ export class AppReg360 extends LitElement {
   render() {
     const abaTopo =
       this.rota.view === 'parcelamentos' || this.rota.view === 'parcelamento' ? 'parcelamentos'
-      : this.rota.view === 'unidades' || this.rota.view === 'unidade' ? 'unidades'
+      : this.rota.view === 'lotes' || this.rota.view === 'lote' || this.rota.view === 'unidade' ? 'lotes'
       : this.rota.view === 'moradores' || this.rota.view === 'morador' ? 'moradores'
       : 'regularizacao';
 
@@ -1256,7 +1276,7 @@ export class AppReg360 extends LitElement {
           .abas=${[
             { id: 'regularizacao', label: 'Regularização', icone: 'fa-solid fa-city' },
             { id: 'parcelamentos', label: 'Parcelamentos', icone: 'fa-solid fa-map' },
-            { id: 'unidades', label: 'Unidades', icone: 'fa-solid fa-house' },
+            { id: 'lotes', label: 'Lotes', icone: 'fa-solid fa-house' },
             { id: 'moradores', label: 'Moradores', icone: 'fa-solid fa-users' },
           ]}
           ativa=${abaTopo}
@@ -1300,7 +1320,7 @@ export class AppReg360 extends LitElement {
     switch (this.rota.view) {
       case 'home': return this._renderHome();
       case 'parcelamentos': return this._renderListaParcelamentos();
-      case 'unidades': return this._renderListaUnidades();
+      case 'lotes': return this._renderListaLotes();
       case 'moradores': return this._renderMoradores();
       case 'morador': return this._renderDetalheMorador();
       case 'setor': return this._renderDetalheSetor();
@@ -1453,20 +1473,69 @@ export class AppReg360 extends LitElement {
     `;
   }
 
-  private _renderListaUnidades(): TemplateResult {
+  /**
+   * Uma página de lotes da instância inteira. Pagina e busca no SERVIDOR:
+   * `GET /lotes` aceita `busca` (ILIKE sobre numero_lote, quadra, conjunto e
+   * rua) e devolve `total`, então não há por que varrer ~6.200 registros para
+   * mostrar 25 linhas.
+   */
+  private async _carregarLotesGlobais(pagina: number) {
+    this.carregando = true;
+    try {
+      const resp = await reg360Api.lotesPagina(
+        { busca: this.buscaLotesGlobais },
+        pagina,
+        LOTES_GLOBAIS_POR_PAGINA,
+      );
+      this.lotesGlobais = resp.dados ?? [];
+      this.totalLotesGlobais = Number(resp.total ?? this.lotesGlobais.length);
+      this.paginaLotesGlobais = pagina;
+    } catch (e: any) {
+      this._registrarFalha(e, 'Falha ao carregar lotes');
+    } finally {
+      this.carregando = false;
+    }
+  }
+
+  private _buscarLotesGlobais(termo: string) {
+    this.buscaLotesGlobais = termo;
+    // Busca nova recomeça da página 1: manter a página anterior mostraria
+    // "Página 4 de 1" e uma tabela vazia que parece falta de dado.
+    void this._carregarLotesGlobais(1);
+  }
+
+  private _renderListaLotes(): TemplateResult {
+    const paginas = Math.max(1, Math.ceil(this.totalLotesGlobais / LOTES_GLOBAIS_POR_PAGINA));
     return html`
+      <urbi-input
+        label="Buscar por número, quadra, conjunto ou rua"
+        .valor=${this.buscaLotesGlobais}
+        @urbi:input-change=${(e: CustomEvent) => this._buscarLotesGlobais(String(e.detail.valor ?? ''))}
+      ></urbi-input>
       <urbi-tabela
         clicavel
         ?carregando=${this.carregando}
-        mensagemVazio="Nenhuma unidade"
+        mensagemVazio=${this.buscaLotesGlobais
+          ? `Nenhum lote encontrado para "${this.buscaLotesGlobais}"`
+          : 'Nenhum lote cadastrado nesta instância'}
         .colunas=${[
           { id: 'ident', label: 'Identificação', valor: (l: any) => nomeDe(l) },
-          { id: 'bloco', label: 'Bloco', valor: (l: any) => String(l.bloco ?? '—') },
+          { id: 'endereco', label: 'Endereço', valor: (l: any) => String(l.rua ?? '—') },
+          { id: 'quadra', label: 'Quadra', valor: (l: any) => String(l.quadra ?? '—') },
           { id: 'area', label: 'Área (m²)', alinhamento: 'direita', valor: (l: any) => String(l.area_efetiva ?? l.area ?? '—') },
         ]}
-        .linhas=${this.unidades}
-        @urbi:tabela-click=${(e: CustomEvent) => this._navegar(`/unidade/${e.detail.linha.id}`)}
+        .linhas=${this.lotesGlobais}
+        @urbi:tabela-click=${(e: CustomEvent) => this._navegar(`/lote/${e.detail.linha.id}`)}
       ></urbi-tabela>
+      ${this.totalLotesGlobais > LOTES_GLOBAIS_POR_PAGINA
+        ? html`<div class="barra-acoes">
+            <urbi-botao variante="fantasma" pequeno ?desabilitado=${this.paginaLotesGlobais <= 1}
+              @click=${() => void this._carregarLotesGlobais(this.paginaLotesGlobais - 1)}>Anterior</urbi-botao>
+            <span class="prop-meta">Página ${this.paginaLotesGlobais} de ${paginas} · ${this.totalLotesGlobais} lotes</span>
+            <urbi-botao variante="fantasma" pequeno ?desabilitado=${this.paginaLotesGlobais >= paginas}
+              @click=${() => void this._carregarLotesGlobais(this.paginaLotesGlobais + 1)}>Próxima</urbi-botao>
+          </div>`
+        : nothing}
     `;
   }
 
@@ -1493,7 +1562,20 @@ export class AppReg360 extends LitElement {
         @urbi:aba-selecionar=${(e: CustomEvent) => { this.abaDetalhe = e.detail.id; }}
       ></urbi-abas>
       ${this.abaDetalhe === 'empreendimentos'
-        ? html`<urbi-tabela clicavel
+        ? this.parcelamentos.length === 0 && !this.carregando && !this.erro && !this.avisoFlag
+          ? html`<urbi-estado-vazio
+              icone="fa-solid fa-map"
+              titulo=${this.totalParcelamentosInstancia === 0
+                ? 'Nenhum parcelamento cadastrado'
+                : 'Nenhum parcelamento neste setor'}
+              descricao=${this.totalParcelamentosInstancia === 0
+                ? 'A instância não tem parcelamento nenhum — não é recorte deste setor que está vazio.'
+                : this.totalParcelamentosInstancia === null
+                  ? 'Não foi possível conferir quantos parcelamentos a instância tem.'
+                  : `A instância tem ${this.totalParcelamentosInstancia} parcelamentos, e nenhum deles aponta para este setor. ` +
+                    'Parcelamento sem `setor_habitacional_id` aparece na lista de Parcelamentos e em setor nenhum.'}
+            ></urbi-estado-vazio>`
+          : html`<urbi-tabela clicavel
             .colunas=${[
               { id: 'nome', label: 'Nome', valor: (l: any) => nomeDe(l) },
               { id: 'status', label: 'Status', render: (l: any) => { const b = badgeStatusParcelamento(l.status); return html`<urbi-badge cor=${b.cor}>${b.label}</urbi-badge>`; } },

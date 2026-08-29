@@ -188,11 +188,24 @@ export const reg360Api = {
   // `unidades` só existe sob incorporação no Núcleo — `incorporacao_id` é NOT
   // NULL e não há coluna `parcelamento_id`. Por isso o filtro aqui é por
   // incorporação, e o objeto de navegação da app é o LOTE.
-  unidades: (p?: { incorporacao_id: number }): Promise<any[]> =>
+  //
+  // O parâmetro é OBRIGATÓRIO de propósito: `unidades()` sem filtro varria a
+  // instância inteira para uma entidade que quase não tem linha, e era o que
+  // alimentava a aba "Unidades" do topo — uma tela que só sabia ficar vazia.
+  // Com o tipo assim, esquecer a incorporação vira erro de compilação, não uma
+  // tela em branco que ninguém sabe explicar.
+  unidades: (p: { incorporacao_id: number }): Promise<any[]> =>
     nucleo.listarTudo('unidades', p),
   unidade: (id: number): Promise<any> => nucleo.buscar('unidades', id),
   lotes: (p?: Record<string, string | number>): Promise<any[]> =>
     nucleo.listarTudo('lotes', p),
+  /**
+   * Uma página de lotes, para a lista global da aba de topo. Pagina e busca no
+   * servidor — `busca` é ILIKE sobre numero_lote, quadra, conjunto e rua — em
+   * vez de varrer os ~6.200 lotes só para exibir 25 linhas.
+   */
+  lotesPagina: (p: { busca?: string } = {}, pagina = 1, porPagina = 25) =>
+    nucleo.listarPagina('lotes', p as Record<string, unknown>, pagina, porPagina),
   lote: (id: number): Promise<any> => nucleo.buscar('lotes', id),
   matriculas: (): Promise<any[]> => nucleo.listarTudo('matriculas'),
   /** Incorporação de um lote, quando há. Exige a flag `ler` em `incorporacoes`. */
