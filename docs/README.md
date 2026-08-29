@@ -32,6 +32,7 @@ Toda leitura passa por `frontend/nucleo-cliente.ts`, que pagina em laço, memori
 | `/setor/:id` | Detalhe do Setor — KPIs, abas Empreendimentos e Propostas |
 | `/parcelamentos` | Lista de Parcelamentos (cards), com busca |
 | `/parcelamentos/setor/:id` | A mesma lista, filtrada por Setor |
+| `/parcelamentos/setor/sem` | Os parcelamentos **fora de qualquer setor** (`setor_habitacional_id` nulo) |
 | `/parcelamentos/fase/:fase` | A mesma lista, filtrada por fase de regularização |
 | `/parcelamento/:id` | Detalhe do Parcelamento — KPIs, abas Lotes e Propostas |
 | `/lotes` | Lista de Lotes da instância, com busca e paginação **de servidor** |

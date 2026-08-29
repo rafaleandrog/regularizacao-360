@@ -60,6 +60,19 @@ São três varreduras, cada uma memorizada por sessão:
 
 Com elas em memória, o agregado de qualquer parcelamento ou setor é conta local — os 60 cards da lista não disparam 60 requisições.
 
+## Parcelamento sem setor, e por que a soma não fecha
+
+`parcelamentos.setor_habitacional_id` é **NULLABLE** no Núcleo. Um parcelamento órfão aparece normalmente na lista `/parcelamentos` e **em setor nenhum** — então os lotes dele não entram no VGV de card de setor algum, e somar os setores um a um dá menos que a instância inteira.
+
+O defeito nunca foi o órfão existir; era ele sumir **em silêncio**. Agora:
+
+- a **home** ganha um card `Sem setor` quando há órfãos, com contagem e lotes, que leva a `/parcelamentos/setor/sem`;
+- abaixo dos cards, uma linha diz quantos dos N parcelamentos estão fora de qualquer setor e que os lotes deles não entram nos cards acima;
+- o **detalhe do Setor** declara, sob o VGV, quantos parcelamentos e quanto de VGV ficaram fora de todos os setores;
+- a lista de Parcelamentos ganha o chip `Sem setor (N)`, que só aparece onde há órfão.
+
+É o mesmo princípio do rótulo de cobertura que o VGV já usava: **número exibido diz sobre que base foi calculado.**
+
 **Enquanto as bases não estão em memória, a tela não mostra número.** VGV calculado sobre base vazia dá exatamente R$ 0,00 com "todos sem preço" — indistinguível de um parcelamento que de fato não tem preço nenhum. Então o painel diz *"calculando"* enquanto carrega, e *"VGV indisponível"* se a carga falhou. As duas frases são melhores que um zero com cara de resposta.
 
 Isso vale para **toda** entrada na tela, inclusive abrir `/parcelamento/:id` direto ou dar reload nela: o ramo carrega as bases, e o elo de Setor da cascata sai do próprio detalhe (que já traz `setor_habitacional_id`), sem buscar a lista de parcelamentos.

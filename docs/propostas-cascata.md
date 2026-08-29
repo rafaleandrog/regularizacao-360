@@ -30,6 +30,29 @@ A proposta vigente de um imóvel é resolvida subindo a hierarquia — a mais es
 
 **Elo sem id conhecido é pulado, não invalida a cadeia.** Uma unidade cujo lote-pai não veio ainda herda do parcelamento. É por isso que a ordem de carregamento importa na tela: o contexto do imóvel (parcelamento, e daí o setor) é resolvido **antes** da cascata — senão o elo de Setor sumiria, e é justamente lá que mora o preço-base que sempre existe.
 
+## Não existe "o lote" de uma unidade
+
+No Núcleo, `unidades` tem `incorporacao_id` (NOT NULL) e **não tem** `lote_id` nem `parcelamento_id`. `incorporacoes` não tem pai nenhum — só `id`, `nome` e `slug`. O único caminho para cima é:
+
+```
+unidade → incorporação → lotes com aquele incorporacao_id → parcelamento
+```
+
+E `lotes.incorporacao_id` é **N:1**: vários lotes podem apontar para a mesma incorporação.
+
+**A consequência é que o elo `lote` de uma unidade muitas vezes não existe**, e eleger um irmão qualquer inventaria um vínculo que o Núcleo não modela — com o efeito prático de o preço herdado sair de um lote arbitrário.
+
+A regra, em `comum/unidade-cadeia.ts` (`paiDaUnidade`), é:
+
+| Lotes da incorporação | Elo `lote` | Elo `parcelamento` | A tela diz |
+|---|---|---|---|
+| exatamente 1 | esse lote | o dele | nada — é o caso comum |
+| vários, mesmo parcelamento | **pulado** | o comum a todos | que a herança pula o nível de Lote |
+| vários, parcelamentos diferentes | **pulado** | **nenhum** | que só vale proposta na própria unidade |
+| nenhum | pulado | nenhum | que não há de onde herdar |
+
+**Antes deste tratamento a unidade não herdava nada.** A tela passava `this.detalhe?.lote_id` e `this.detalhe?.parcelamento_id` — duas colunas que a tabela `unidades` não tem — então os dois eram sempre `undefined`, e `_carregarContextoDoImovel` só resolvia o parcelamento `if (d.parcelamento_id)`. A cadeia de uma unidade era literalmente `[unidade]`: sem lote, sem parcelamento e sem setor. O comentário no código declarava a intenção oposta; o código não a cumpria.
+
 Quando uma proposta vence, deixa de ser vigente e a cascata **sobe automaticamente**. Nenhum imóvel fica sem preço de referência porque **sempre há uma Proposta Tabela vigente no Setor** (RN-02).
 
 ### Implementação

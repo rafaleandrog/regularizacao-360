@@ -16,6 +16,7 @@ import {
 } from '../comum/regularizacao.js';
 import { soData, hoje, statusVigencia, type StatusVigencia } from '../comum/cascata.js';
 import { lerQuitacao } from '../comum/quitacao.js';
+import { paiDaUnidade, avisoDeHeranca } from '../comum/unidade-cadeia.js';
 import {
   transacaoDisponivel,
   transacoesDoImovel,
@@ -122,7 +123,7 @@ interface Rota {
    * (`/parcelamentos/setor/2`) e não em query string porque `subRota()` do
    * shell é montada só do `pathname` — `?setor=2` não chegaria aqui.
    */
-  filtroSetor?: number | null;
+  filtroSetor?: number | 'sem' | null;
   /** Filtro de fase de regularização, também na sub-rota. */
   filtroFase?: string | null;
 }
@@ -134,12 +135,16 @@ function parseRota(sub: string): Rota {
   const id = b ? Number(b) : null;
   switch (a) {
     case 'parcelamentos': {
-      const setor = partes[1] === 'setor' && partes[2] ? Number(partes[2]) : null;
+      // `sem` é recorte de verdade, não ausência de filtro: são os
+      // parcelamentos com `setor_habitacional_id` nulo, que de outro modo só
+      // apareceriam na lista geral e em setor nenhum.
+      const bruto = partes[1] === 'setor' && partes[2] ? partes[2] : null;
+      const setor = bruto === 'sem' ? 'sem' : bruto ? Number(bruto) : null;
       const fase = partes[1] === 'fase' && partes[2] ? partes[2] : null;
       return {
         view: 'parcelamentos',
         id: null,
-        filtroSetor: Number.isInteger(setor) ? setor : null,
+        filtroSetor: setor === 'sem' || Number.isInteger(setor) ? (setor as number | 'sem') : null,
         filtroFase: fase,
       };
     }
@@ -191,9 +196,14 @@ export class AppReg360 extends LitElement {
   @state() private totalLotesGlobais = 0;
   @state() private paginaLotesGlobais = 1;
   @state() private buscaLotesGlobais = '';
-  // Quantos parcelamentos a instância tem, lido só quando o recorte do setor
-  // volta vazio — é o que separa "este setor não tem" de "não há nenhum".
+  // Quantos parcelamentos a instância tem — é o que separa "este setor não
+  // tem" de "não há nenhum", e o denominador do aviso de órfãos.
   @state() private totalParcelamentosInstancia: number | null = null;
+  // `parcelamentos.setor_habitacional_id` é NULLABLE: parcelamento sem setor
+  // aparece na lista geral e em setor nenhum, e os lotes dele não entram no VGV
+  // de nenhum card da home. A soma dos setores, então, não fecha com a
+  // instância — e sem isto nada na tela avisaria.
+  @state() private parcelamentosSemSetor: any[] = [];
 
   @state() private detalhe: any = null;
   @state() private propostas: Proposta[] = [];
@@ -222,6 +232,10 @@ export class AppReg360 extends LitElement {
   @state() private formReg: Record<string, any> = {};
   /** Parcelamento e incorporação do imóvel aberto, resolvidos para exibir nome. */
   @state() private paiDoImovel: { parcelamento?: any; incorporacao?: any } = {};
+  /** Por que a unidade não herda tudo o que poderia. `null` no caso comum. */
+  @state() private avisoHerancaUnidade: string | null = null;
+  /** O lote da unidade, só quando a incorporação cobre exatamente um. */
+  private loteDaUnidade: number | null = null;
   /** Unidades da incorporação do lote aberto, quando há incorporação. */
   @state() private unidadesDoLote: any[] = [];
 
@@ -361,6 +375,7 @@ export class AppReg360 extends LitElement {
           // 32 requisições, então roda em segundo plano e preenche depois.
           this.setores = await reg360Api.setores();
           this.parcelamentos = await reg360Api.parcelamentos();
+          void this._carregarOrfaosDeSetor(this.parcelamentos);
           void this._varrerLotes();
           void this._carregarRegularizacao();
           break;
@@ -392,11 +407,10 @@ export class AppReg360 extends LitElement {
             this.detalhe = await reg360Api.setor(this.rota.id);
             this.parcelamentos = await reg360Api.parcelamentos({ setor_habitacional_id: this.rota.id });
             // Recorte vazio é ambíguo: pode não haver parcelamento NESTE setor,
-            // ou a instância inteira estar vazia. Só a segunda leitura separa os
-            // dois — são ~60 registros, e o cache do cliente já a divide com a
-            // lista de Parcelamentos. Tabela muda não explica nada a ninguém.
-            this.totalParcelamentosInstancia =
-              this.parcelamentos.length > 0 ? null : (await reg360Api.parcelamentos()).length;
+            // ou a instância inteira estar vazia. Só a lista global separa os
+            // dois — e ela também diz quantos órfãos de setor existem, que é o
+            // que explica a soma dos setores não fechar com o total.
+            await this._carregarOrfaosDeSetor();
             await this._carregarPropostas('setor', this.rota.id);
             void this._varrerLotes();
           }
@@ -442,7 +456,11 @@ export class AppReg360 extends LitElement {
             this.vigente = await reg360Api.resolverVigente({
               nivel: this.rota.view,
               ref_id: this.rota.id,
-              lote_id: ehLote ? undefined : this.detalhe?.lote_id,
+              // `unidades` não tem coluna `lote_id`: o elo só existe quando a
+              // incorporação cobre um lote só. Com mais de um, ele é pulado de
+              // propósito — eleger um irmão inventaria vínculo que o Núcleo não
+              // modela, e o preço herdado sairia de um lote arbitrário.
+              lote_id: ehLote ? undefined : (this.loteDaUnidade ?? undefined),
               parcelamento_id: this.detalhe?.parcelamento_id ?? this.paiDoImovel.parcelamento?.id,
               setor_id: this.paiDoImovel.parcelamento?.setor_habitacional_id,
             });
@@ -529,6 +547,8 @@ export class AppReg360 extends LitElement {
     if (!d) return;
     this.paiDoImovel = {};
     this.unidadesDoLote = [];
+    this.avisoHerancaUnidade = null;
+    this.loteDaUnidade = null;
     try {
       if (d.parcelamento_id) {
         this.paiDoImovel = { ...this.paiDoImovel, parcelamento: await reg360Api.parcelamento(Number(d.parcelamento_id)) };
@@ -541,6 +561,22 @@ export class AppReg360 extends LitElement {
         this.paiDoImovel = { ...this.paiDoImovel, incorporacao: inc };
         // A própria unidade aberta não entra na lista de irmãs.
         this.unidadesDoLote = unidades.filter((u: any) => Number(u.id) !== Number(d.id));
+      }
+      // A UNIDADE não tem `parcelamento_id` nem `lote_id` no Núcleo, então sem
+      // isto a cadeia dela seria só [unidade]: nem lote, nem parcelamento, nem
+      // setor — ela não herdaria preço de lugar nenhum. O único caminho para
+      // cima é pelos lotes da incorporação.
+      if (!d.parcelamento_id && d.incorporacao_id) {
+        const lotes = await reg360Api.lotes({ incorporacao_id: Number(d.incorporacao_id) });
+        const pai = paiDaUnidade(lotes);
+        this.loteDaUnidade = pai.loteId;
+        this.avisoHerancaUnidade = avisoDeHeranca(pai);
+        if (pai.parcelamentoId) {
+          this.paiDoImovel = {
+            ...this.paiDoImovel,
+            parcelamento: await reg360Api.parcelamento(pai.parcelamentoId),
+          };
+        }
       }
     } catch (e: any) {
       // Contexto ausente degrada rótulo, não a tela.
@@ -1354,8 +1390,51 @@ export class AppReg360 extends LitElement {
             </urbi-card>
           `;
         })}
+        ${this.parcelamentosSemSetor.length > 0
+          ? html`
+            <urbi-card
+              clicavel
+              titulo="Sem setor"
+              @urbi:card-click=${() => this._navegar('/parcelamentos/setor/sem')}
+            >
+              <urbi-stack>
+                <div class="prop-meta">Fora de qualquer setor habitacional</div>
+                <div>${this.parcelamentosSemSetor.length} ${this.parcelamentosSemSetor.length === 1 ? 'parcelamento' : 'parcelamentos'}</div>
+                <div class="prop-meta">${this._rotuloLotes(this._agregar(this.parcelamentosSemSetor).quantidade)}</div>
+              </urbi-stack>
+            </urbi-card>`
+          : nothing}
       </urbi-grid>
+      ${this.parcelamentosSemSetor.length > 0
+        ? html`<p class="prop-meta">
+            ${this.parcelamentosSemSetor.length} de ${this.totalParcelamentosInstancia ?? '—'} parcelamentos
+            não apontam para setor nenhum (<code>setor_habitacional_id</code> é nullable no Núcleo).
+            Os lotes deles <strong>não entram</strong> nos cards de setor acima — por isso a soma dos
+            setores não fecha com o total da instância.
+          </p>`
+        : nothing}
     `;
+  }
+
+  /**
+   * Os parcelamentos órfãos de setor, e o total da instância.
+   *
+   * Usa a lista global (~60 registros), que o cliente memoriza por sessão: na
+   * home ela já foi buscada, e no detalhe do Setor o custo é um acerto de
+   * cache. Sem esta leitura o detalhe do Setor não teria como distinguir
+   * "este setor não tem parcelamento" de "a instância não tem nenhum".
+   */
+  private async _carregarOrfaosDeSetor(todos?: any[]) {
+    try {
+      const lista = todos ?? (await reg360Api.parcelamentos());
+      this.totalParcelamentosInstancia = lista.length;
+      this.parcelamentosSemSetor = lista.filter((p: any) => !p.setor_habitacional_id);
+    } catch {
+      // Não derruba a tela: sem esta leitura a app apenas deixa de AFIRMAR
+      // sobre órfãos, que é melhor que afirmar errado.
+      this.totalParcelamentosInstancia = null;
+      this.parcelamentosSemSetor = [];
+    }
   }
 
   /**
@@ -1375,7 +1454,8 @@ export class AppReg360 extends LitElement {
 
   private _renderListaParcelamentos(): TemplateResult {
     let base = this.parcelamentos;
-    if (this.rota.filtroSetor) base = base.filter((p) => p.setor_habitacional_id === this.rota.filtroSetor);
+    if (this.rota.filtroSetor === 'sem') base = base.filter((p) => !p.setor_habitacional_id);
+    else if (this.rota.filtroSetor) base = base.filter((p) => p.setor_habitacional_id === this.rota.filtroSetor);
     if (this.rota.filtroFase) base = base.filter((p) => this._faseDe(p.id) === this.rota.filtroFase);
     const filtrados = filtrarPorTexto(base, this.termoBusca, ['nome', 'slug']);
 
@@ -1387,12 +1467,19 @@ export class AppReg360 extends LitElement {
 
     return html`
       <urbi-chips-atalho
-        .opcoes=${this.setores.map((sh) => ({ id: String(sh.id), rotulo: nomeDe(sh) }))}
+        .opcoes=${[
+          ...this.setores.map((sh) => ({ id: String(sh.id), rotulo: nomeDe(sh) })),
+          // O chip só aparece onde há órfão — chip que nunca filtra nada é ruído.
+          ...(this.parcelamentosSemSetor.length > 0
+            ? [{ id: 'sem', rotulo: `Sem setor (${this.parcelamentosSemSetor.length})` }]
+            : []),
+        ]}
         ativo=${this.rota.filtroSetor ? String(this.rota.filtroSetor) : ''}
         @urbi:chip-atalho:click=${(e: CustomEvent) => {
           // Clicar no chip ativo desliga o filtro.
-          const id = Number(e.detail.id);
-          this._navegar(this.rota.filtroSetor === id ? '/parcelamentos' : `/parcelamentos/setor/${id}`);
+          const bruto = String(e.detail.id);
+          const id = bruto === 'sem' ? 'sem' : Number(bruto);
+          this._navegar(this.rota.filtroSetor === id ? '/parcelamentos' : `/parcelamentos/setor/${bruto}`);
         }}
       ></urbi-chips-atalho>
 
@@ -1553,6 +1640,15 @@ export class AppReg360 extends LitElement {
         <urbi-kpi rotulo="Propostas aprovadas" .valor=${this.propostas.filter((p) => p.status_aprovacao === 'aprovada').length} formato="numero"></urbi-kpi>
       </urbi-wrap>
       ${this._renderVgv(somarAgregados(this.parcelamentos.map((p) => this._agregadoDoParcelamento(p.id))))}
+      ${this.parcelamentosSemSetor.length > 0
+        ? html`<p class="prop-meta">
+            Fora deste e de qualquer outro setor há
+            ${this.parcelamentosSemSetor.length} ${this.parcelamentosSemSetor.length === 1 ? 'parcelamento' : 'parcelamentos'}
+            (${fmtMoeda(somarAgregados(this.parcelamentosSemSetor.map((p) => this._agregadoDoParcelamento(p.id))).vgv)}
+            de VGV). Somar os setores um a um, portanto, não fecha com o total da instância.
+            <a href="#" @click=${(e: Event) => { e.preventDefault(); this._navegar('/parcelamentos/setor/sem'); }}>Ver quais</a>.
+          </p>`
+        : nothing}
       <urbi-abas
         .abas=${[
           { id: 'empreendimentos', label: 'Empreendimentos' },
@@ -1766,6 +1862,9 @@ export class AppReg360 extends LitElement {
           ? html`<urbi-badge cor="sucesso">Quitado${this._quitacao.em ? ` em ${soData(this._quitacao.em)}` : ''}${this._quitacao.porNome ? ` · ${this._quitacao.porNome}` : ''}</urbi-badge>`
           : nothing}
       </urbi-wrap>
+      ${this.avisoHerancaUnidade
+        ? html`<urbi-banner variante="aviso">${this.avisoHerancaUnidade}</urbi-banner>`
+        : nothing}
       ${this.podeAprovar ? this._renderBotaoQuitacao() : nothing}
       ${ocupantes.length > 0
         ? html`<urbi-wrap>${ocupantes.map((v: any) => html`
@@ -1796,6 +1895,11 @@ export class AppReg360 extends LitElement {
       ${this.unidadesDoLote.length > 0
         ? html`
             <p class="secao-titulo">Unidades desta incorporação</p>
+            <p class="prop-meta">
+              A lista é da <strong>incorporação</strong>, não deste lote — no Núcleo a unidade
+              pende da incorporação, e vários lotes podem compartilhar a mesma. Dois lotes irmãos
+              mostram, por isso, exatamente estas unidades.
+            </p>
             <urbi-tabela
               clicavel
               .colunas=${[
