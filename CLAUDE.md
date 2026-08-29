@@ -94,6 +94,12 @@ Boa parte do desenho atual existe para driblar limitações do Núcleo que valia
 
 O que fica esperando essa atualização: **#40** (release, instalação e QA — a skill `qa` precisa das variáveis `URBIVERSO_QA_*` no ambiente da sessão) e as issues da tabela acima.
 
+## Release nasce não homologada — decisão permanente
+
+**O workflow publica sempre com `--prerelease`.** No shell, "homologada" é o campo nativo `prerelease` do GitHub Release: `true` = não homologada. Homologar é **ato de quem atesta**, não propriedade do build.
+
+Não reverta isso "porque a release não instalou". Se ela não instalou, o que falta é o **`Nível de aceitação = Releases`** no app da instância — no padrão (`homologado`), a release aparece no modal e é descartada ao aplicar. Ver `docs/operacao.md` § Homologação.
+
 ## Escopo
 
 O monorepo `urbiverso/urbiverso` é **somente leitura** para este trabalho. Campo que falta no Núcleo vira tabela no schema `reg360`, com referência lógica por id — nunca FK.
