@@ -16,6 +16,8 @@ tipo:
 
 **3. Flag desligada é `403`, não lista vazia.** O gate de flags do Núcleo recusa o acesso com dois códigos distintos, e tratá-los como erro genérico faz a tela dizer "nenhum registro" quando o problema é permissão.
 
+**4. Filtro fora da allowlist é ignorado em silêncio — e devolve dado A MAIS.** Ver a seção própria abaixo. É a restrição que mais engana, porque a intuição espera o contrário.
+
 ## O cliente
 
 `frontend/nucleo-cliente.ts` é a única porta de leitura. Tela nenhuma chama `urbiVerso.nucleo` direto — fazer isso perde as três coisas abaixo de uma vez.
@@ -36,6 +38,44 @@ A decisão de **quando parar** a varredura mora separada, em `comum/paginacao.ts
 4. página incompleta — menos linhas que `por_pagina`.
 
 Há ainda um **teto de 200 páginas** como guarda: se o servidor devolver páginas cheias para sempre (bug, ou filtro que o Núcleo ignora silenciosamente por não estar na allowlist), a varredura para em vez de rodar até o navegador morrer.
+
+## O que o Núcleo aceita como filtro
+
+No Núcleo, `lerFiltrosExatos` itera sobre a **allowlist da entidade**, não sobre a query string:
+
+```ts
+for (const campo of camposFiltro) {
+  const bruto = query[campo];
+  if (bruto === undefined) continue;
+```
+
+Um parâmetro fora da allowlist **nunca chega ao SQL**. Não há erro, não há aviso — a listagem simplesmente volta *sem aquele recorte*.
+
+**A consequência inverte a intuição:** filtro ignorado devolve **mais** linhas, nunca menos. Ignorar um recorte só pode aumentar o resultado. Então o sintoma de filtro ignorado **não é tela vazia** — é tela cheia de dado que não é do recorte pedido, com cara de resposta certa. Se uma lista voltou vazia, a causa é outra: o filtro foi honrado e não casou, `removido=excluir` escondeu linhas, a página passou do total, ou a app engoliu um `403`.
+
+Foi assim que a v0.1.1 pediu `unidades?parcelamento_id=N` — filtro que não existe — e teria mostrado as unidades da instância inteira como se fossem daquele parcelamento.
+
+A tabela vive em `comum/nucleo-filtros.ts`, **com a data em que foi conferida** contra os `OPCOES_*` das rotas do Núcleo. É retrato de um instante: se o Núcleo mudar, ela mente até alguém reconferir.
+
+| Recurso | Filtros de igualdade aceitos |
+|---|---|
+| `parcelamentos` | `setor_habitacional_id` (o único) |
+| `lotes` | `parcelamento_id`, `incorporacao_id`, `matricula_id` |
+| `unidades` | `incorporacao_id`, `matricula_id` — **não** `parcelamento_id` |
+| `glebas` | `matricula_id` |
+| `setores-habitacionais`, `matriculas`, `incorporacoes` | nenhum |
+| `pessoas` | `tipo` |
+
+`pagina`, `por_pagina`, `busca` e `removido` valem em qualquer recurso e não são recorte por coluna — `busca` é ILIKE sobre os `camposBusca` da entidade (em `lotes`: `numero_lote`, `quadra`, `conjunto`, `rua`).
+
+O cliente aplica **duas guardas**, e as duas falham alto em vez de devolver dado plausível:
+
+1. **Antes de sair** — `conferirFiltros` recusa filtro que o recurso não honra. Recurso ausente da tabela também é recusado: sem allowlist não dá para afirmar que o Núcleo obedece.
+2. **Na volta** — `linhasForaDoFiltro` confere que as linhas devolvidas casam com o recorte pedido, para os campos que vêm no payload. É a guarda contra a allowlist ter mudado do outro lado sem esta tabela acompanhar.
+
+Há ainda `linhasDaPagina`, que recusa envelope sem a lista `dados`. Antes era `resposta?.dados || []`, que tratava resposta de forma desconhecida como **vazia** — se o Núcleo trocasse o envelope, a app diria "não tem dado" em vez de "não entendi a resposta".
+
+É a mesma ideia do `casaComChave` do importador (`scripts/importar-planilhao.mjs`), agora do lado da leitura.
 
 ## Cache
 
