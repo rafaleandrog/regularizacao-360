@@ -58,6 +58,10 @@ O workflow `.github/workflows/release.yml` empacota e publica um GitHub Release.
 
 O release anexa `reg360-<versao>.urbiapp.tgz` + `.sha256`. Na instância: `Admin → Apps → Instalar` (do release do repo ou upload do tarball). Após instalar, habilite as flags de Núcleo e atribua os papéis — ver [`docs/operacao.md`](docs/operacao.md).
 
+**A release nasce NÃO homologada**, sempre (`--prerelease`). No shell, "homologada" é o campo nativo `prerelease` do GitHub invertido, e homologar é ato de quem atesta — não propriedade do build.
+
+Consequência que morde: o app precisa estar com **`Nível de aceitação = Releases`** na instância. No padrão (`homologado`), a release aparece no modal de upgrade e é **descartada na hora de aplicar**. Ver [`docs/operacao.md`](docs/operacao.md) § Homologação.
+
 ## Estado
 
 Completo em código, **ainda não instalado numa instância**. O que falta depende de coisas fora deste repo — catálogo de Uso, a entidade Transação existir no Núcleo, o release na Pinguim e um PAT com `read:packages`. A lista está em [`docs/README.md`](docs/README.md) § Estado atual.

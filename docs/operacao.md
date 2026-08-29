@@ -14,6 +14,38 @@ A versão atual é **0.9.0**. O salto de `0.1.1` não é cosmético: entre uma e
 
 **Por que não `1.0.0`:** o app ainda não rodou em instância nenhuma. `1.0.0` é o número **depois** do QA na Pinguim confirmar que ele funciona com o dado real — não antes. O `0.9` também espelha a linhagem da spec, que era v0.9 mirando a v1.0.
 
+## Homologação: a release nasce NÃO homologada
+
+**"Homologada" não é campo do manifesto nem do tarball** — é o campo **nativo `prerelease` do GitHub Release**, lido pelo shell:
+
+| `prerelease` no GitHub | Como a instância mostra |
+|---|---|
+| `true` | **não homologada** |
+| `false` | homologada |
+
+O workflow publica **sempre com `--prerelease`**. Homologar é **ato de quem atesta**, não propriedade do build — o build não sabe se foi testado. Antes disso o `gh release create` omitia a flag, e o default do GitHub (`false`) fazia toda release nascer homologada por omissão, não por escolha.
+
+Promover uma release depois de validá-la:
+
+```bash
+gh release edit reg360-v<x.y.z>_<sha8> --prerelease=false
+```
+
+### O passo que falha calado
+
+**O app precisa estar com `Nível de aceitação = Releases`** em `Admin → Apps → reg360 → Upgrades`. O padrão da plataforma é `homologado`, e com ele o filtro age em dois momentos diferentes:
+
+| Caminho | Nível usado | Com a release não homologada |
+|---|---|---|
+| **Listagem** — o modal "Atualizar" | sempre `releases` | **aparece** |
+| **Aplicar**: atualizar do repositório, auto-update | o nível do app | **descartada** se for `homologado` |
+
+Ou seja: no padrão, a release **aparece no modal e é recusada na hora de aplicar**. O sintoma é uma versão que se oferece e não instala, sem dizer o motivo.
+
+Trocar o nível é reservado ao **administrador pleno da instância** — está na mesma tela dos upgrades.
+
+Esse é justamente o desenho do filtro: a instância intermediária fica em `Releases` e recebe tudo; produção fica em `homologado` e só recebe o que alguém atestou.
+
 ## Build e registro
 
 ```bash

@@ -6,6 +6,17 @@
 #      sem sha a plataforma não faz upgrade de build em mesma versão).
 # Em ambos: build → urbi-empacotar → release GitHub com reg360-<versao>.urbiapp.tgz
 # + .sha256 (convenção que a plataforma consome para instalar/atualizar a app).
+#
+# A RELEASE NASCE NÃO HOMOLOGADA (`--prerelease`), sempre. No shell, "homologada"
+# é lido do campo NATIVO `prerelease` do GitHub: `true` = não homologada,
+# `false` = homologada. Homologar é ATO de quem atesta, não propriedade do build
+# — e o build não sabe se foi testado. Promover depois:
+#
+#   gh release edit reg360-v<x.y.z>_<sha8> --prerelease=false
+#
+# ATENÇÃO: o app precisa estar com `Nível de aceitação = Releases` na instância.
+# No padrão (`homologado`), a release aparece no modal mas é DESCARTADA na hora
+# de aplicar — some sem explicar por quê. Ver docs/operacao.md § Homologação.
 name: release
 on:
   push:
@@ -81,4 +92,5 @@ jobs:
             dist/reg360-${{ steps.tag.outputs.versao }}.urbiapp.tgz.sha256 \
             --target "$(git rev-parse HEAD)" \
             --title "reg360 v${{ steps.tag.outputs.versao }} ($(git rev-parse --short=8 HEAD))" \
-            --generate-notes
+            --generate-notes \
+            --prerelease
