@@ -16,6 +16,7 @@ import {
 } from '../comum/regularizacao.js';
 import { soData, hoje, statusVigencia, type StatusVigencia } from '../comum/cascata.js';
 import { lerQuitacao } from '../comum/quitacao.js';
+import { ABAS_TOPO } from '../comum/navegacao.js';
 import { paiDaUnidade, avisoDeHeranca } from '../comum/unidade-cadeia.js';
 import {
   transacaoDisponivel,
@@ -222,6 +223,10 @@ export class AppReg360 extends LitElement {
   /** `lote.id` → ocupantes. Preenchido sob demanda, página a página. */
   @state() private pessoasPorLote = new Map<number, any[]>();
   @state() private carregandoPessoas = false;
+  // Lote cuja carga de ocupantes FALHOU. Sem isto ele vira `—` na coluna
+  // Pessoas — igual a "nenhum ocupante" — e ninguém investiga o que parece
+  // normal. Mesmo tratamento que o índice por morador já dá (`lotesQueFalharam`).
+  @state() private lotesComFalhaDePessoas: ReadonlySet<number> = new Set();
   /** `parcelamento_id` → dados de regularização do app. */
   @state() private regularizacaoPorParcelamento = new Map<number, any>();
   /** Dados do imóvel aberto: preços de contrato e manual. */
@@ -1093,20 +1098,42 @@ export class AppReg360 extends LitElement {
     if (alvo.length === 0) return;
     this.carregandoPessoas = true;
     try {
+      const falhados: number[] = [];
       const resultados = await mapaComLimite<any, [number, any[]]>(alvo, LIMITE_SIMULTANEO, async (l) => {
         try {
           return [Number(l.id), await reg360Api.pessoasDoLote(Number(l.id))];
         } catch {
-          // Um lote que falha não derruba a página inteira.
+          // Um lote que falha não derruba a página inteira — mas some do mapa
+          // ele também não pode: lista vazia aqui viraria `—`, que é o mesmo
+          // que a tela mostra para lote SEM ocupante.
+          falhados.push(Number(l.id));
           return [Number(l.id), []];
         }
       });
       const mapa = new Map(this.pessoasPorLote);
       for (const [id, pessoas] of resultados) mapa.set(id, pessoas);
       this.pessoasPorLote = mapa;
+      const falhas = new Set(this.lotesComFalhaDePessoas);
+      for (const [id] of resultados) falhas.delete(id); // retry que deu certo limpa a marca
+      for (const id of falhados) falhas.add(id);
+      this.lotesComFalhaDePessoas = falhas;
     } finally {
       this.carregandoPessoas = false;
     }
+  }
+
+  /**
+   * Tenta de novo só os lotes que falharam. Eles ficam no `pessoasPorLote` com
+   * lista vazia (para não repetir a requisição a cada render), então a recarga
+   * precisa TIRÁ-LOS do mapa antes — senão a guarda de "já carregado" pula.
+   */
+  private async _recarregarPessoasQueFalharam() {
+    const ids = [...this.lotesComFalhaDePessoas];
+    if (ids.length === 0) return;
+    const mapa = new Map(this.pessoasPorLote);
+    for (const id of ids) mapa.delete(id);
+    this.pessoasPorLote = mapa;
+    await this._carregarPessoasDaPagina(ids.map((id) => ({ id })));
   }
 
   /**
@@ -1309,12 +1336,7 @@ export class AppReg360 extends LitElement {
     return html`
       <urbi-shell-page titulo="Regularização 360">
         <urbi-abas
-          .abas=${[
-            { id: 'regularizacao', label: 'Regularização', icone: 'fa-solid fa-city' },
-            { id: 'parcelamentos', label: 'Parcelamentos', icone: 'fa-solid fa-map' },
-            { id: 'lotes', label: 'Lotes', icone: 'fa-solid fa-house' },
-            { id: 'moradores', label: 'Moradores', icone: 'fa-solid fa-users' },
-          ]}
+          .abas=${ABAS_TOPO.map((a) => ({ id: a.id, label: a.titulo, icone: a.icone }))}
           ativa=${abaTopo}
           @urbi:aba-selecionar=${(e: CustomEvent) => {
             const id = e.detail.id;
@@ -1802,6 +1824,9 @@ export class AppReg360 extends LitElement {
           { id: 'area', label: 'Área (m²)', alinhamento: 'direita', valor: (l: any) => fmtArea(l.area_efetiva ?? l.area) },
           { id: 'pessoas', label: 'Pessoas', render: (l: any) => {
               const vinculos = this.pessoasPorLote.get(Number(l.id));
+              if (this.lotesComFalhaDePessoas.has(Number(l.id))) {
+                return html`<urbi-badge cor="alerta">não carregou</urbi-badge>`;
+              }
               if (!vinculos) return html`<span class="prop-meta">…</span>`;
               if (vinculos.length === 0) return html`<span class="prop-meta">—</span>`;
               return html`<urbi-wrap>${vinculos.map((v: any) =>
@@ -1811,6 +1836,15 @@ export class AppReg360 extends LitElement {
         .linhas=${daPagina}
         @urbi:tabela-click=${(e: CustomEvent) => this._navegar(`/lote/${e.detail.linha.id}`)}
       ></urbi-tabela>
+
+      ${this.lotesComFalhaDePessoas.size > 0
+        ? html`<p class="prop-meta">
+            ${this.lotesComFalhaDePessoas.size}
+            ${this.lotesComFalhaDePessoas.size === 1 ? 'lote não teve' : 'lotes não tiveram'}
+            os ocupantes carregados — a coluna Pessoas deles está marcada, não vazia.
+            <urbi-botao variante="fantasma" pequeno @click=${() => void this._recarregarPessoasQueFalharam()}>Tentar de novo</urbi-botao>
+          </p>`
+        : nothing}
 
       ${paginas > 1
         ? html`<div class="barra-acoes">

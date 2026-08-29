@@ -46,6 +46,10 @@ O filtro de Setor vai **na sub-rota**, não em query string: `subRota()` do shel
 
 O termo de busca **não** entra na rota — é transitório por decisão, para não poluir o histórico a cada tecla.
 
+**O nav tem fonte única.** A lista vive em `comum/navegacao.ts`; a barra da app deriva dela, e `backend/__tests__/navegacao.test.ts` amarra o `nav` do `manifesto.json` item a item, por contagem exata. A duplicação é imposta pela plataforma — o shell lê JSON e não importa TypeScript — mas divergir entre os dois agora quebra um teste em vez de falhar calado.
+
+**Falha ao carregar ocupantes não vira `—`.** Na tabela de lotes, o lote cuja requisição de `imovel_pessoas` falhou aparece marcado como *não carregou*, distinto de `—` (que significa "nenhum ocupante"). Abaixo da tabela, a contagem e um botão de tentar de novo. Antes os dois casos eram idênticos na tela, e ninguém investiga o que parece normal.
+
 **A aba de topo é Lotes, não Unidades.** Até a v0.9.0 o nav trazia uma entrada `/unidades` herdada da spec v0.9, que listava `GET /unidades` sem filtro. No Núcleo, `unidades.incorporacao_id` é NOT NULL — unidade só existe sob incorporação — e o inventário real da instância são os ~6.200 lotes. A aba, portanto, só sabia ficar vazia, enquanto o objeto de navegação do app (o Lote) não tinha entrada nenhuma. `/unidade/:id` continua existindo, alcançada pelo detalhe do lote.
 
 A lista de Lotes **pagina e busca no servidor**: `GET /lotes` aceita `busca` (ILIKE sobre `numero_lote`, `quadra`, `conjunto` e `rua`) e devolve `total`. Varrer 6.200 registros para exibir 25 linhas seriam 32 requisições por tela.
