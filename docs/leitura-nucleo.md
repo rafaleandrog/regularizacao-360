@@ -129,6 +129,8 @@ Depois da primeira varredura, o cache serve o resto da sessão: voltar para a ho
 
 Sem essa distinção, uma falha na troca de rota — a mesma janela que este parágrafo descreve acima — girava para sempre: o `detalhe` zerado nunca voltava a ficar presente, e nada dizia ao spinner para parar.
 
+**A lista da tela de Lotes tem um caso pior que o vazio: o cheio.** Quando a busca falha, os resultados da busca **anterior** continuam na tabela, agora sob o termo novo, com a paginação do total velho por baixo. Apagá-los perderia o que já foi lido; o que não pode é deixá-los se passarem pela resposta que não veio. A tela agora diz, num banner, que a tabela é o resultado anterior.
+
 ## Quando a flag está desligada
 
 Os dois `403` do gate têm causas opostas e remédios diferentes:

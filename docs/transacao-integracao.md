@@ -46,6 +46,22 @@ Um `grep -i transac` fora desses três não deve achar lógica de negócio. Se a
 
 **Cancelada não conta em lugar nenhum.** Nem nas datas de assinatura, nem no estágio. Mostrar a data de uma transação cancelada diria que o imóvel caminhou onde ele voltou.
 
+## Falha de leitura não é "não há transação" — e isso entrou antes de a integração ligar
+
+Com `DISPONIVEL = false`, `transacoesDoImovel` devolve lista vazia sem chamar a API, e a aba distingue *"Integração de Transações não ligada"* de *"Nenhuma transação neste imóvel"*. Faltava a terceira causa: **a leitura falhou**.
+
+Ela não é hipotética nem futura. `garantirEstado()` já consulta `/transacoes-estado` hoje, e `transacoesDoImovel` passa a bater na API no dia em que o passo 7 virar a chave. Sem guarda, uma queda de rede naquele dia produziria, ao mesmo tempo:
+
+- *"Nenhuma transação neste imóvel"* no estado vazio;
+- as **três datas de assinatura** como `—`, que ali significa "não assinou";
+- **nenhum badge de estágio** no cabeçalho — a mesma ausência silenciosa que o PR #84 consertou pelo outro caminho, o do tipo desconhecido.
+
+Três afirmações erradas de uma vez, todas com a cara de fato apurado. Por isso a guarda entrou **antes** da virada, e não como parte dela: depois de ligada, o defeito seria descoberto em produção.
+
+O que a aba faz agora, com a integração ligada e a leitura falhada: banner de erro no topo dizendo que as datas e o badge não refletem o gravado; `…` no lugar de `—` nas três datas; e um badge **"Transações não lidas"** no cabeçalho, no lugar do silêncio.
+
+O `dot` da aba também mudou de critério. Ele lia `transacaoDisponivel()`, que no primeiro render ainda é a **constante compilada** — o valor do servidor só chega quando `garantirEstado()` resolve. Agora o dot aparece enquanto a leitura não concluiu, e não só quando a integração está desligada.
+
 ## O catálogo de tipos pode divergir — e a divergência não fica muda
 
 `TIPOS_TRANSACAO` (`pre_contrato`, `promessa_compra_venda`, `cessao`, `escritura`) foi escrito **antes de a entidade existir no Núcleo**, quando não havia com o que conferir. O Núcleo tem o descritor como **fonte única**, em `GET /transacoes/tipos`, e o vocabulário dele é mais largo — a doc cita permuta, rescisão, usucapião.
