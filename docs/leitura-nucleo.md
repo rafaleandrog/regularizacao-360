@@ -117,6 +117,18 @@ Depois da primeira varredura, o cache serve o resto da sessão: voltar para a ho
 
 `erro` e `cargaFalhou` são coisas diferentes de propósito: o primeiro alimenta o banner, o segundo impede a tela de **afirmar** sobre uma base que ela não leu. Um banner acima não desfaz uma frase abaixo.
 
+**A troca de rota zera o alvo antes de carregar o novo.** `this.rota` muda e só depois a carga corre; sem o reset síncrono no topo de `_carregar()`, a janela entre o clique e a resposta renderiza o cabeçalho, os KPIs, o preço e as propostas do **objeto anterior**, sob o nome do novo. É a única classe de defeito desta família que não exibe ausência — exibe **o dado de outra coisa**, com a mesma confiança. São zerados: `detalhe`, `propostas`, `vigente`, `dadosDoImovel`, `paiDoImovel`, `unidadesDoLote`, `avisoHerancaUnidade`, `loteDaUnidade` e os três estados de leitura do imóvel — a lista é fechada porque cada item que fica de fora é um dado do objeto anterior sobrevivendo sob o nome do novo.
+
+**A mesma janela, sem resposta, agora vira estado — não spinner eterno.** Os cinco renders de detalhe (Setor, Parcelamento, Imóvel, Morador, Proposta) caem em `_renderEsperaDetalhe()` enquanto `this.detalhe` é `null`, e antes deste PR isso significava só uma coisa: `<urbi-loading>`. Mas `_carregar()` zera `detalhe` tanto na carga que vai dar certo quanto na que vai **falhar**, e `cargaFalhou` já estava marcado quando a falha acontecia — só que nada olhava para ele nesse ponto. `_renderEsperaDetalhe()` agora distingue os dois casos que cabem em "ainda não tenho o objeto":
+
+| `this.detalhe` | `cargaFalhou` | O que aparece |
+|---|---|---|
+| presente | — | o detalhe normal |
+| `null` | `false` | `<urbi-loading>` — carregando de verdade |
+| `null` | `true` | `<urbi-estado-vazio>` "Não foi possível carregar este item", com aviso de que o que aparecia antes não é mais confiável |
+
+Sem essa distinção, uma falha na troca de rota — a mesma janela que este parágrafo descreve acima — girava para sempre: o `detalhe` zerado nunca voltava a ficar presente, e nada dizia ao spinner para parar.
+
 ## Quando a flag está desligada
 
 Os dois `403` do gate têm causas opostas e remédios diferentes:
@@ -145,6 +157,10 @@ A regra geral continua valendo ao contrário: **quando o conjunto não cabe em m
 Ambos vêm da mesma raiz: o Núcleo não oferece **leitura em lote por lista de ids**, e a app não pode mudar isso — o monorepo é somente leitura para este trabalho.
 
 **Matrícula na tabela de Lotes.** O payload do lote traz `matricula_id` e `area_matricula`, mas **não** o número da matrícula. E `GET /matriculas` não aceita filtro por id (só `busca` por `numero`/`cri`/`uf`), então não dá para pedir "as 38 matrículas deste parcelamento". Ou se varre o conjunto inteiro uma vez e memoriza, ou se faz uma requisição por lote. A varredura ganha: ~25 requisições pagas uma vez por sessão, contra centenas.
+
+A varredura memorizada tem o mesmo problema de fundo que o resto desta família: quando ela falha, `rotuloReferencia` sozinho devolve `…` para toda linha — e `…` que nunca vira `—` nem o número é limbo, não estado. O `…` aqui **não** significa "não tem matrícula" (isso é `—`, quando `matricula_id` é `null`); significa "não consegui achar o número desta referência", porque o mapa que resolveria o id nunca chegou a existir. Sem marca própria, essas duas causas do mesmo `…` ficam indistinguíveis, e o usuário não sabe se espera ou se recarrega.
+
+Por isso `leituraMatriculas` (`EstadoContagem`) acompanha o cache: `correndo` até a varredura terminar, `falhou` se ela estourar, `concluida` — inclusive quando o cache já estava quente e a chamada nem saiu de novo, porque o cache é por **sessão**, não por imóvel, e um `correndo` perpétuo ali mentiria a cada nova tela. Quando falha, aparece um `urbi-banner` de erro com "Tentar de novo" — no rodapé da tabela de lotes do Parcelamento, e no detalhe do Imóvel quando aquele lote específico tem `matricula_id` — dizendo explicitamente que o `…` ali é referência não resolvida, não ausência: confundir os dois faria alguém concluir "este lote não tem matrícula" de um lote que tem.
 
 **Ocupantes na tabela de Lotes.** `imovel_pessoas` só é alcançável em `GET /lotes/:id/pessoas` — não há expansão de vínculo na listagem de lotes, nem na de imóveis, nem na de pessoas. Mostrar quem ocupa cada lote custa **uma requisição por linha**.
 

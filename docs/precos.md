@@ -47,6 +47,37 @@ Enquanto a entidade Transação não existir no Núcleo, `preco_estatico` é **o
 
 A assimetria **é** o desenho: quem grava não corrige. `validador_interno` também não passa na correção.
 
+## O painel só afirma o que leu
+
+Duas leituras alimentam o painel do imóvel, e as duas podem não ter acontecido:
+
+| Leitura | O que ela traz | O que a falta dela faz, sem guarda |
+|---|---|---|
+| `imovel_dados` | preço de contrato e preço manual | `{}` é o caso NORMAL de imóvel nunca editado, então `preco_estatico == null` fica verdadeiro pelo motivo errado |
+| contexto do imóvel | parcelamento, e o lote da unidade — os **elos da cascata** | `resolverVigente` é chamado sem `parcelamento_id` e sem `setor_id`, **pula os elos de cima**, e devolve um preço menor (ou nenhum) |
+
+`controlesDePreco` (`comum/preco.ts`) recebe o estado das duas e decide o que a tela pode dizer e oferecer:
+
+- **A frase "Sem preço definido: não há contrato, preço manual, nem proposta vigente na cascata"** é afirmação sobre **três** fontes, e exige as duas leituras concluídas. Sem isso ela sai enquanto a tela ainda está lendo.
+- **Nenhum botão de escrita antes de a leitura concluir.** Este não é zelo genérico: com `imovel_dados` em `{}`, a tela oferecia *"Gravar preço de contrato"* para um imóvel que **tem** contrato, e o backend respondia **409 `REG360_PRECO_ESTATICO_GRAVADO`**. Botão que a API recusa não entra — a regra é do `CLAUDE.md`, e aqui ela dependia de um estado que ninguém tinha conferido.
+- **A resposta guardada tem que ser a leitura certa.** `_acaoPreco` guardava em `dadosDoImovel` o retorno de qualquer ação do imóvel — inclusive o de desvincular morador, que é `{ removido: true, … }` e não tem `quitado` nem `preco_estatico`. Desvincular um morador fazia o badge "Quitado" sumir e o botão de gravar contrato reaparecer. Não é falta de leitura: é a resposta errada no lugar dela, e nenhuma guarda de estado pega isso — só o chamador dizendo se a resposta é o registro.
+- **Uma frase por leitura que faltou**, como banner de aviso — `erro` quando a leitura falhou de fato, `alerta` enquanto ela só está em curso. Falha de contexto é a mais silenciosa das duas: ela não some da tela, ela **muda o número** e o apresenta como fato.
+
+### `…` no lugar de `—`, e por que é uma decisão só
+
+No KPI de preço, `—` diz "não tem"; enquanto uma leitura relevante ainda não concluiu, o que ele diz é "não sei" — a mesma distinção de `comum/referencias.ts`. O painel mostra **quatro** KPIs de preço, e nem todos dependem das duas leituras do mesmo jeito:
+
+| KPI | Depende de | Marcador de ausência |
+|---|---|---|
+| Preço de contrato | só `imovel_dados` | `…` enquanto ela corre ou falha, `—` só depois de concluída |
+| Preço proposta vigente | só o contexto (a cascata) | `…` enquanto ele corre ou falha, `—` só depois de concluído |
+| Valor do imóvel | as **duas** | `marcadorPrecoAusente` |
+| Preço final | as **duas** | `marcadorPrecoAusente` |
+
+Os dois primeiros ecoam ou derivam de **uma fonte só**, e cada um pode decidir sozinho olhando a leitura correspondente. Os dois últimos são o preço aplicável — o resultado da precedência inteira — e por isso dependem de que **ambas** as leituras tenham concluído: um contrato lido não basta se a cascata que resolveria o preço na ausência dele ainda não foi consultada, e vice-versa.
+
+Antes deste conserto, "Valor do imóvel" e "Preço final" olhavam só a leitura de `imovel_dados` e ignoravam a do contexto — com o contrato lido e a cascata **falha**, os dois mostravam `—` ("não tem preço") quando o certo era `…` ("não sei", porque a cascata pode ter pulado elos e o preço real ser outro). `marcadorPrecoAusente` (`comum/preco.ts`) existe para que essa combinação não seja decidida duas vezes de jeitos diferentes: é a mesma condição que libera `podeAfirmarSemPreco` — as duas leituras concluídas — reaproveitada como valor de exibição, para os dois KPIs cujo número é fruto das duas fontes.
+
 ## Descontos
 
 Os campos `desconto_a_vista`, `desconto_6x`, `desconto_12x`, `desconto_lote_grande` e `lote_grande_m2` existem no schema desde o primeiro commit e **nunca apareceram em tela nenhuma** — API sem UI é feature invisível. Agora o painel mostra o preço por forma de pagamento quando a proposta traz percentuais.

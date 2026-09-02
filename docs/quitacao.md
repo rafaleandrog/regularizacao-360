@@ -37,6 +37,25 @@ A recusa é explícita, não descarte silencioso: cliente que manda `quitado` nu
 
 **A presença da chave é o que conta, não o valor.** `quitado: false` também é recusado — ele desmarcaria a quitação passando por baixo do gate.
 
+## Quatro estados na tela, não dois
+
+`lerQuitacao` responde "o registro diz quitado?" e não tem como responder a pergunta anterior: **houve registro para ler?** Enquanto `imovel_dados` está em voo — e depois de uma requisição que falhou — o objeto é `{}`, e `Boolean(undefined)` é `false`.
+
+O custo não é cosmético: o badge **"Quitado" some de um imóvel quitado**, e o botão oferecido vira *"Marcar como quitado"* para quem já está.
+
+Por isso `estadoDaQuitacao(leitura, dados)` (`comum/quitacao.ts`) tem quatro estados, na ordem em que a precedência importa:
+
+| Estado | Na tela |
+|---|---|
+| `falhou` | badge vermelho (`cor="erro"`) "Quitação: não foi possível ler" |
+| `nao_lida` | badge neutro "Quitação: consultando…" — nenhuma afirmação |
+| `quitado` | o badge verde, com data e autoria |
+| `nao_quitado` | nada — e aqui o silêncio **significa** mesmo não quitado |
+
+**Falha vence**, pelo mesmo motivo de `estadoDosOcupantes`: quem falha deixa `{}` para trás, e perguntar só ao objeto devolveria "não quitado" com a cara de um fato apurado.
+
+O controle de quitar/desquitar só aparece nos dois estados apurados (`podeAlternarQuitacao`). Nos outros dois entra a frase, não o botão: oferecer o botão errado é pedir ao usuário que confirme uma coisa que a tela não sabe.
+
 ## Idempotente de propósito
 
 Marcar o que já está marcado devolve `{ ok: true, ja_quitado: true }`, não `409`. Repetir a ação não é conflito: é o mesmo desfecho, e um erro ali só faria a tela tratar problema que não existe.
