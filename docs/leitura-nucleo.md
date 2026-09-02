@@ -57,7 +57,13 @@ Um parâmetro fora da allowlist **nunca chega ao SQL**. Não há erro, não há 
 
 Foi assim que a v0.1.1 pediu `unidades?parcelamento_id=N` — filtro que não existe — e teria mostrado as unidades da instância inteira como se fossem daquele parcelamento.
 
-A tabela vive em `comum/nucleo-filtros.ts`, **com a data em que foi conferida** contra os `OPCOES_*` das rotas do Núcleo. É retrato de um instante: se o Núcleo mudar, ela mente até alguém reconferir.
+A tabela vive em `comum/nucleo-filtros.ts`, **com a data em que foi conferida e contra o quê**. É retrato de um instante: se o Núcleo mudar, ela mente até alguém reconferir.
+
+**Reconfira contra o SDK publicado** (`node_modules/@urbiverso/sdk/docs/nucleo.md` § Filtros de igualdade exata), nunca contra as rotas do Núcleo no `main` do monorepo. A conferência de 2026-08-29 usou o monorepo; os valores coincidiram, mas o método estava errado — o `main` está sempre à frente do que foi cunhado, então uma tabela conferida por ali descreve um Núcleo que a instância pode não estar rodando.
+
+**Um caso o contrato publicado não responde:** `pessoas`. A doc do SDK lista os filtros de `lotes`, `glebas`, `unidades` e `parcelamentos` — entidades da fábrica de handlers —, e a rota de pessoas é escrita à mão, fora dela. O `tipo` que a tela de Moradores usa fica sem confirmação documental, e quem cobre isso é a **segunda guarda**: `linhasForaDoFiltro` confere o `tipo` de cada linha que voltou, e o Núcleo entrega `tipo` no payload como discriminador de supertipo. Se o filtro passar a ser ignorado, a tela quebra alto com `ErroDeFiltro` em vez de listar pessoa jurídica em silêncio.
+
+É por isso que as duas guardas existem: a allowlist barra o que sabemos que não funciona; a conferência da linha pega o que não temos como saber.
 
 | Recurso | Filtros de igualdade aceitos |
 |---|---|
