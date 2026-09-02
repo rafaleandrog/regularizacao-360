@@ -211,6 +211,17 @@ export const reg360Api = {
   /** Incorporação de um lote, quando há. Exige a flag `ler` em `incorporacoes`. */
   incorporacao: (id: number): Promise<any> => nucleo.buscar('incorporacoes', id),
   /** Ocupantes do lote (`imovel_pessoas`). Uma requisição por lote — ver o cliente. */
+  /**
+   * Ocupantes de um imóvel (`imovel_pessoas`). Uma requisição por imóvel — o
+   * Núcleo não expõe a junção em lote; ver o cliente.
+   *
+   * Vale para lote **e** unidade: no Núcleo o sub-recurso é
+   * `GET /{subtipo}/:id/pessoas`, e a flag é pedida no supertipo `imoveis`,
+   * que o manifesto já declara. Gleba tem a mesma rota — quando a #68 decidir
+   * se gleba entra na navegação, é aqui que ela entra.
+   */
+  pessoasDoImovel: (tipo: 'lote' | 'unidade', id: number): Promise<any[]> =>
+    nucleo.listarSubRecurso(tipo === 'lote' ? 'lotes' : 'unidades', id, 'pessoas'),
   pessoasDoLote: (id: number): Promise<any[]> => nucleo.listarSubRecurso('lotes', id, 'pessoas'),
 
   // ---- Moradores (pessoas do Núcleo) ----

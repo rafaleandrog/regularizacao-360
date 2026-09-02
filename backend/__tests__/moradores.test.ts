@@ -1,7 +1,13 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { situacaoCadastro, indexarPorPessoa, vinculosConhecidos } from '../../comum/moradores.js';
+import {
+  situacaoCadastro,
+  indexarPorPessoa,
+  vinculosConhecidos,
+  estadoDosOcupantes,
+  TEXTO_OCUPANTES,
+} from '../../comum/moradores.js';
 
 const PESSOA = { nome: 'Maria', cpf: '09977579148' };
 
@@ -162,5 +168,55 @@ describe('lerQuitacao', () => {
   test('quitado traz data e autor junto', () => {
     const q = lerQuitacao({ quitado: true, quitado_em: '2026-08-28', quitado_por_nome: 'Ana' });
     assert.deepEqual(q, { quitado: true, em: '2026-08-28', porNome: 'Ana' });
+  });
+});
+
+describe('estadoDosOcupantes — não consultado não é vazio', () => {
+  test('perguntou e não veio ninguém: aí sim é vazio', () => {
+    assert.equal(
+      estadoDosOcupantes({ consultado: true, falhou: false, quantidade: 0 }),
+      'vazio',
+    );
+    assert.equal(TEXTO_OCUPANTES.vazio, 'Nenhum morador vinculado.');
+  });
+
+  // O defeito que isto conserta: a tela da unidade nunca perguntava (o
+  // carregamento era gateado em `ehLote`) e mesmo assim afirmava "nenhum".
+  test('não perguntou: a tela não pode afirmar que não há', () => {
+    assert.equal(
+      estadoDosOcupantes({ consultado: false, falhou: false, quantidade: 0 }),
+      'nao_consultado',
+    );
+    assert.notEqual(TEXTO_OCUPANTES.nao_consultado, TEXTO_OCUPANTES.vazio);
+  });
+
+  // Quem falha fica no mapa com lista vazia, para a tela não repetir a
+  // requisição a cada render. Sem a marca de falha, isso viraria "nenhum".
+  test('falha vence "consultado", porque falha entra no mapa como lista vazia', () => {
+    assert.equal(
+      estadoDosOcupantes({ consultado: true, falhou: true, quantidade: 0 }),
+      'falhou',
+    );
+    assert.notEqual(TEXTO_OCUPANTES.falhou, TEXTO_OCUPANTES.vazio);
+  });
+
+  test('com ocupantes quem fala é a lista, não uma frase', () => {
+    assert.equal(
+      estadoDosOcupantes({ consultado: true, falhou: false, quantidade: 3 }),
+      'com_ocupantes',
+    );
+    assert.equal(TEXTO_OCUPANTES.com_ocupantes, null);
+  });
+
+  test('falha com ocupantes carregados antes ainda é falha — o número pode ter mudado', () => {
+    assert.equal(
+      estadoDosOcupantes({ consultado: true, falhou: true, quantidade: 2 }),
+      'falhou',
+    );
+  });
+
+  test('os quatro estados têm texto declarado, e só um é null', () => {
+    const nulos = Object.values(TEXTO_OCUPANTES).filter((v) => v === null);
+    assert.equal(nulos.length, 1, 'só com_ocupantes dispensa frase');
   });
 });

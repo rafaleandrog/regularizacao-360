@@ -134,3 +134,42 @@ export const ROTULO_VINCULO: Record<string, string> = {
   posse_ilegitima: 'Posse ilegítima',
   usuario: 'Usuário',
 };
+
+/**
+ * Os três estados dos ocupantes de um imóvel — e por que não são dois.
+ *
+ * "Nenhum morador vinculado" é uma **afirmação sobre o mundo**, e só pode ser
+ * feita depois de perguntar. A tela do imóvel dizia isso para toda unidade,
+ * porque o carregamento de ocupantes era gateado em `ehLote` — ela nunca
+ * perguntava, e respondia mesmo assim.
+ *
+ * É o mesmo princípio que `situacaoCadastro` já aplica a contato e vínculo
+ * (`indeterminado` em vez de "falta"), e que o PR #78 aplicou à listagem de
+ * lotes: **não consultado não é vazio, e falha não é vazio.** Lista vazia é a
+ * resposta certa só quando a pergunta foi feita e voltou sem ninguém.
+ */
+export type EstadoOcupantes = 'nao_consultado' | 'falhou' | 'vazio' | 'com_ocupantes';
+
+export function estadoDosOcupantes(entrada: {
+  consultado: boolean;
+  falhou: boolean;
+  quantidade: number;
+}): EstadoOcupantes {
+  // Falha vem antes de "consultado": quem falha fica no mapa com lista vazia
+  // (para a tela não repetir a requisição a cada render), então perguntar só
+  // pelo mapa não distinguiria falha de ausência real.
+  if (entrada?.falhou) return 'falhou';
+  if (!entrada?.consultado) return 'nao_consultado';
+  return Number(entrada.quantidade) > 0 ? 'com_ocupantes' : 'vazio';
+}
+
+/**
+ * O que a tela escreve em cada estado. `null` onde há ocupantes: aí quem fala
+ * é a lista, não uma frase.
+ */
+export const TEXTO_OCUPANTES: Record<EstadoOcupantes, string | null> = {
+  nao_consultado: 'Ocupantes ainda não consultados.',
+  falhou: 'Não foi possível carregar os ocupantes — o número real pode ser outro.',
+  vazio: 'Nenhum morador vinculado.',
+  com_ocupantes: null,
+};
