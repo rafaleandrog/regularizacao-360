@@ -35,6 +35,8 @@ import {
   vinculosConhecidos,
   BADGE_SITUACAO,
   ROTULO_VINCULO,
+  estadoDosOcupantes,
+  TEXTO_OCUPANTES,
   type Situacao,
 } from '../comum/moradores.js';
 import {
@@ -480,7 +482,10 @@ export class AppReg360 extends LitElement {
               ? await reg360Api.lote(this.rota.id)
               : await reg360Api.unidade(this.rota.id);
             await this._carregarPropostas(this.rota.view, this.rota.id);
-            if (ehLote) this.pessoasPorLote = new Map([[this.rota.id, await reg360Api.pessoasDoLote(this.rota.id)]]);
+            // Unidade também tem ocupantes: `imovel_pessoas` liga a QUALQUER
+            // subtipo de imóvel. Antes isto era gateado em `ehLote`, e a tela
+            // afirmava "nenhum morador vinculado" sem nunca ter perguntado.
+            await this._carregarOcupantesDoImovel(this.rota.view, this.rota.id);
             void this._carregarMatriculas();
             void this._carregarAcoes();
             void this._carregarTransacoes();
@@ -1318,6 +1323,29 @@ export class AppReg360 extends LitElement {
   }
 
   /**
+   * Ocupantes do imóvel aberto — lote ou unidade.
+   *
+   * Marca a falha em `lotesComFalhaDePessoas` pelo mesmo motivo da listagem:
+   * quem falha entra no mapa com lista vazia (para a tela não repetir a
+   * requisição a cada render), e sem a marca isso viraria "nenhum morador"
+   * — a afirmação que este método existe para não fazer.
+   */
+  private async _carregarOcupantesDoImovel(tipo: string, id: number) {
+    const chave = Number(id);
+    const falhas = new Set(this.lotesComFalhaDePessoas);
+    try {
+      const pessoas = await reg360Api.pessoasDoImovel(tipo === 'unidade' ? 'unidade' : 'lote', chave);
+      this.pessoasPorLote = new Map([[chave, pessoas]]);
+      falhas.delete(chave);
+    } catch {
+      this.pessoasPorLote = new Map([[chave, []]]);
+      falhas.add(chave);
+    } finally {
+      this.lotesComFalhaDePessoas = falhas;
+    }
+  }
+
+  /**
    * Tenta de novo só os lotes que falharam. Eles ficam no `pessoasPorLote` com
    * lista vazia (para não repetir a requisição a cada render), então a recarga
    * precisa TIRÁ-LOS do mapa antes — senão a guarda de "já carregado" pula.
@@ -2068,6 +2096,11 @@ export class AppReg360 extends LitElement {
     const ehLote = this.rota.view === 'lote';
     const mat = this.matriculasPorId.get(Number(u.matricula_id));
     const ocupantes = this.pessoasPorLote.get(Number(u.id)) || [];
+    const estadoOcupantes = estadoDosOcupantes({
+      consultado: this.pessoasPorLote.has(Number(u.id)),
+      falhou: this.lotesComFalhaDePessoas.has(Number(u.id)),
+      quantidade: ocupantes.length,
+    });
     const voltar = ehLote && u.parcelamento_id ? `/parcelamento/${u.parcelamento_id}` : '/parcelamentos';
     return html`
       <urbi-botao variante="fantasma" icone="fa-solid fa-arrow-left" pequeno @click=${() => this._navegar(voltar)}>Voltar</urbi-botao>
@@ -2095,7 +2128,7 @@ export class AppReg360 extends LitElement {
         ? html`<urbi-banner variante="aviso">${this.avisoHerancaUnidade}</urbi-banner>`
         : nothing}
       ${this.podeAprovar ? this._renderBotaoQuitacao() : nothing}
-      ${ocupantes.length > 0
+      ${estadoOcupantes === 'com_ocupantes'
         ? html`<urbi-wrap>${ocupantes.map((v: any) => html`
             <urbi-badge cor="padrao">${v.nome ?? v.razao_social ?? `#${v.pessoa_id}`}${v.legado ? ' (legado)' : ''}</urbi-badge>
             ${this.podeCriar && ehLote && v.vinculo_id
@@ -2108,13 +2141,18 @@ export class AppReg360 extends LitElement {
                     ).then(() => { this.pessoasPorLote = new Map(); return this._carregarPessoasDaPagina([u]); });
                   }}>Desvincular</urbi-botao>`
               : nothing}`)}</urbi-wrap>`
-        : html`<p class="prop-meta">Nenhum morador vinculado.</p>`}
+        : html`<p class="prop-meta">${TEXTO_OCUPANTES[estadoOcupantes]}</p>`}
       ${this.podeCriar && ehLote
         ? html`<div class="barra-acoes">
             <urbi-botao variante="secundario" pequeno icone="fa-solid fa-user-plus"
               @click=${() => this._abrirFormMorador(Number(u.id))}>Vincular morador</urbi-botao>
           </div>`
-        : nothing}
+        : this.podeCriar
+          // Vincular e desvincular batem em `/lotes/:id/pessoas` no backend
+          // desta app — não há rota equivalente para unidade. Botão que a API
+          // recusaria não entra; a linha diz onde fazer.
+          ? html`<p class="prop-meta">Vínculo de morador é feito no <strong>lote</strong>, não na unidade.</p>`
+          : nothing}
       ${this.ultimoCadastro ? this._renderResultadoCadastro() : nothing}
       ${this._renderPainelPrecos(u)}
       <urbi-wrap>

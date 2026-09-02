@@ -60,6 +60,25 @@ A distinção é a razão de existir do terceiro estado: varrer os indeterminado
 
 O filtro roda no **cliente**, sobre a página carregada: a regra é da app, não do Núcleo, e depende dos contatos que vêm por sub-recurso. A tela diz quantos de quantos, para o número não parecer o total da instância.
 
+## A unidade também tem ocupantes — e a tela dizia que não
+
+`imovel_pessoas` liga pessoa a **qualquer subtipo de imóvel**, e o Núcleo expõe `GET /{lote|gleba|unidade}/:id/pessoas`. O detalhe do imóvel, porém, carregava ocupantes só quando a rota era `lote` — e mesmo assim escrevia **"Nenhum morador vinculado."** na unidade.
+
+Era afirmação sem pergunta. Hoje a unidade carrega ocupantes pela mesma rota, e a frase só aparece quando a consulta foi feita e voltou vazia.
+
+**São quatro estados, não dois** (`estadoDosOcupantes`, em `comum/moradores.ts`):
+
+| Estado | Quando | O que a tela diz |
+|---|---|---|
+| `com_ocupantes` | consultado, veio gente | a lista — quem fala é ela, não uma frase |
+| `vazio` | consultado, não veio ninguém | "Nenhum morador vinculado." |
+| `nao_consultado` | ainda não perguntou | "Ocupantes ainda não consultados." |
+| `falhou` | a requisição falhou | "Não foi possível carregar os ocupantes — o número real pode ser outro." |
+
+**A ordem importa:** falha vence "consultado". Quem falha entra no mapa com lista vazia — para a tela não repetir a requisição a cada render —, então perguntar só pelo mapa não distinguiria falha de ausência real. É a mesma armadilha que a listagem já tratava.
+
+**Escrita continua só no lote.** `POST /lotes/:id/pessoas` é o que o backend desta app expõe; não há rota equivalente para unidade. Em vez de um botão que a API recusaria, a unidade mostra uma linha dizendo onde fazer.
+
 ## Lote que falha não é lote vazio
 
 Ao indexar, cada lote é uma requisição, e algumas falham. Tratar a falha como "este lote não tem ocupante" esconderia moradores reais **e** apresentaria o recorte como completo — a tela diria "nenhum imóvel" para quem tem um.
