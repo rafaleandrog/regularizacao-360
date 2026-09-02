@@ -100,6 +100,27 @@ export function badgeFase(fase: unknown): OpcaoRotulada {
   return acharOpcao(FASES, fase) ?? { id: String(fase ?? ''), rotulo: String(fase ?? '—'), cor: 'padrao' };
 }
 
+/**
+ * A fase quando os dados de regularização **não foram lidos** — carga em
+ * andamento, ou que falhou.
+ *
+ * Existe porque `faseRegularizacao(undefined)` devolve `'irregular'`, e isso é
+ * correto para o significado dela: parcelamento sem registro em
+ * `parcelamento_dados` de fato não começou a regularizar. O que estava errado
+ * era **quem perguntava** — a tela chamava a função com o mapa vazio durante a
+ * carga (disparada em segundo plano) e depois de uma falha, e todo
+ * parcelamento aparecia como "Irregular".
+ *
+ * "Irregular" não é rótulo neutro: é afirmação sobre a situação jurídica de um
+ * empreendimento. Dizê-la sobre 60 parcelamentos porque uma requisição falhou
+ * é o erro mais caro desta classe.
+ */
+export const BADGE_FASE_NAO_LIDA: OpcaoRotulada = {
+  id: '',
+  rotulo: 'fase não lida',
+  cor: 'padrao',
+};
+
 export function badgeSituacaoRegistral(situacao: unknown): OpcaoRotulada {
   return acharOpcao(SITUACOES_REGISTRAIS, situacao) ?? { id: String(situacao ?? ''), rotulo: String(situacao ?? '—'), cor: 'padrao' };
 }

@@ -4,15 +4,16 @@ import { urbiVerso } from './reg360-env.js';
 import { reg360Api, type Proposta, type Acao, type NovaAcao } from './reg360-api.js';
 import { falhaDeFlag, invalidar as invalidarNucleo, type FalhaDeFlag } from './nucleo-cliente.js';
 import { filtrarPorTexto, normalizarTexto } from '../comum/busca.js';
+import { rotuloReferencia } from '../comum/referencias.js';
 import { mapaComLimite } from '../comum/concorrencia.js';
 import { precoAplicavel, valorDoImovel, aplicarDescontos, type FormaPagamento } from '../comum/preco.js';
 import {
   agregarImoveis, somarAgregados, indexarPropostas, chaveImovel, type Agregado,
-  estadoDaContagem, TEXTO_CONTAGEM,
+  estadoDaContagem, TEXTO_CONTAGEM, TEXTO_CARGA,
 } from '../comum/agregados.js';
 import { badgeStatusParcelamento } from '../comum/status-parcelamento.js';
 import {
-  faseRegularizacao, badgeFase, badgeSituacaoRegistral, situacaoRegistralRelevante,
+  faseRegularizacao, badgeFase, BADGE_FASE_NAO_LIDA, badgeSituacaoRegistral, situacaoRegistralRelevante,
   FASES, SITUACOES_REGISTRAIS,
 } from '../comum/regularizacao.js';
 import { soData, hoje, statusVigencia, type StatusVigencia } from '../comum/cascata.js';
@@ -192,6 +193,12 @@ export class AppReg360 extends LitElement {
   @state() private rota: Rota = { view: 'home', id: null };
   @state() private carregando = false;
   @state() private erro: string | null = null;
+  /**
+   * A carga da view falhou. Separada de `erro` porque as duas servem a coisas
+   * diferentes: `erro` é o banner, esta flag é o que impede a tela de AFIRMAR
+   * sobre uma base que ela não leu.
+   */
+  @state() private cargaFalhou = false;
 
   @state() private setores: any[] = [];
   @state() private parcelamentos: any[] = [];
@@ -234,6 +241,12 @@ export class AppReg360 extends LitElement {
   @state() private lotesComFalhaDePessoas: ReadonlySet<number> = new Set();
   /** `parcelamento_id` → dados de regularização do app. */
   @state() private regularizacaoPorParcelamento = new Map<number, any>();
+  /**
+   * A carga de `parcelamento_dados` terminou? Sem isto, o mapa vazio é
+   * indistinguível de "nenhum parcelamento tem registro" — e a fase derivada
+   * de "sem registro" é `irregular`, uma afirmação jurídica.
+   */
+  @state() private regularizacaoLida = false;
   /** Dados do imóvel aberto: preços de contrato e manual. */
   @state() private dadosDoImovel: any = {};
   /** Modal de preço: qual campo, valor e se é correção de contrato. */
@@ -406,6 +419,10 @@ export class AppReg360 extends LitElement {
   private async _carregar() {
     this.erro = null;
     this.avisoFlag = null;
+    // `erro` alimenta o banner; esta flag alimenta as AFIRMAÇÕES. São coisas
+    // diferentes: o banner diz que algo falhou, mas não impede um card logo
+    // abaixo de exibir "0 parcelamentos" como se tivesse contado.
+    this.cargaFalhou = false;
     // Sem o reset, a contagem lida no setor anterior sobreviveria a uma carga
     // que falha, e a tela afirmaria sobre uma base que ela não leu.
     this.totalParcelamentosInstancia = null;
@@ -519,6 +536,11 @@ export class AppReg360 extends LitElement {
           break;
       }
     } catch (e: any) {
+      // A carga da home é sequencial: setores primeiro, parcelamentos depois.
+      // Se o SEGUNDO falha, `setores` já está populado e a tela renderiza os
+      // cards — cada um contando sobre uma lista vazia. Sem esta marca, eles
+      // diriam "0 parcelamentos" com só um banner genérico a contradizê-los.
+      this.cargaFalhou = true;
       this._registrarFalha(e, 'Falha ao carregar dados');
     } finally {
       this.carregando = false;
@@ -642,19 +664,30 @@ export class AppReg360 extends LitElement {
    * fariam 60 chamadas.
    */
   private async _carregarRegularizacao() {
-    if (this.regularizacaoPorParcelamento.size > 0) return;
+    if (this.regularizacaoLida) return;
     try {
       const { dados } = await reg360Api.listarParcelamentoDados();
       this.regularizacaoPorParcelamento = new Map(
         (dados || []).map((d: any) => [Number(d.parcelamento_id), d]),
       );
+      this.regularizacaoLida = true;
     } catch (e: any) {
+      // Continua NÃO lida: sem isso, a falha faria a tela derivar a fase de um
+      // mapa vazio, e `faseRegularizacao(undefined)` é `irregular`.
       this._registrarFalha(e, 'Falha ao carregar dados de regularização');
     }
   }
 
-  /** Fase do parcelamento. Sem registro, é `irregular` — o estado inicial. */
+  /**
+   * Fase do parcelamento, ou `null` quando os dados **não foram lidos**.
+   *
+   * `faseRegularizacao` devolve `irregular` para registro ausente, e isso é
+   * certo — parcelamento sem linha em `parcelamento_dados` não começou a
+   * regularizar. O que não pode é chamá-la com o mapa vazio: aí `irregular`
+   * deixa de ser derivação e vira chute sobre a situação jurídica de todos.
+   */
   private _faseDe(parcelamentoId: unknown) {
+    if (!this.regularizacaoLida) return null;
     return faseRegularizacao(this.regularizacaoPorParcelamento.get(Number(parcelamentoId)));
   }
 
@@ -1626,7 +1659,14 @@ export class AppReg360 extends LitElement {
 
   private _renderHome(): TemplateResult {
     if (this.carregando && this.setores.length === 0) return html`<urbi-loading></urbi-loading>`;
-    if (this.setores.length === 0) return html`<urbi-estado-vazio icone="fa-solid fa-city" mensagem="Nenhum setor habitacional"></urbi-estado-vazio>`;
+    // "Nenhum setor habitacional" é afirmação sobre a instância. Com a carga
+    // falhada, `setores` fica vazio pelo motivo errado — e o banner de erro
+    // acima não desfaz a frase, só a acompanha.
+    if (this.setores.length === 0) {
+      return html`<urbi-estado-vazio icone="fa-solid fa-city"
+        mensagem=${this.cargaFalhou ? 'Não foi possível carregar os setores' : 'Nenhum setor habitacional'}
+        submensagem=${this.cargaFalhou ? 'O que está no ar não foi lido — o número real pode ser outro.' : ''}></urbi-estado-vazio>`;
+    }
     return html`
       <urbi-grid min="240px" gap="12px">
         ${this.setores.map((sh) => {
@@ -1640,7 +1680,7 @@ export class AppReg360 extends LitElement {
             >
               <urbi-stack>
                 <div class="prop-meta">${sh.slug ?? ''}</div>
-                <div>${doSetor.length} ${doSetor.length === 1 ? 'parcelamento' : 'parcelamentos'}</div>
+                <div>${this._rotuloParcelamentos(doSetor.length)}</div>
                 <div class="prop-meta">${this._rotuloLotes(ag.quantidade)}</div>
               </urbi-stack>
             </urbi-card>
@@ -1708,6 +1748,35 @@ export class AppReg360 extends LitElement {
   }
 
   /**
+   * Número puro que veio da carga da view. Mesmos três estados; sem substantivo
+   * porque o rótulo do KPI já o diz.
+   */
+  private _rotuloCarga(quantidade: number): string {
+    const texto = TEXTO_CARGA[estadoDaContagem({
+      correndo: this.carregando,
+      falhou: this.cargaFalhou,
+    })];
+    return texto ?? String(quantidade);
+  }
+
+  /**
+   * Contagem que vem da carga da view — parcelamentos, não lotes.
+   *
+   * Mesma decisão de três estados da contagem de lotes, outra frase. Sem ela,
+   * a home com `setores` carregado e `parcelamentos` falhado mostra
+   * "0 parcelamentos" em cada card: um zero apurado sobre uma lista que nunca
+   * chegou.
+   */
+  private _rotuloParcelamentos(quantidade: number): string {
+    const texto = TEXTO_CARGA[estadoDaContagem({
+      correndo: this.carregando,
+      falhou: this.cargaFalhou,
+    })];
+    if (texto) return texto;
+    return `${quantidade} ${quantidade === 1 ? 'parcelamento' : 'parcelamentos'}`;
+  }
+
+  /**
    * A área somada dos lotes sai do MESMO mapa da contagem, então herda os
    * mesmos três estados. Sem esta guarda, a varredura que falha mostra
    * "Área dos lotes: 0" ao lado de "contagem indisponível" — dois números da
@@ -1731,7 +1800,12 @@ export class AppReg360 extends LitElement {
     let base = this.parcelamentos;
     if (this.rota.filtroSetor === 'sem') base = base.filter((p) => !p.setor_habitacional_id);
     else if (this.rota.filtroSetor) base = base.filter((p) => p.setor_habitacional_id === this.rota.filtroSetor);
-    if (this.rota.filtroFase) base = base.filter((p) => this._faseDe(p.id) === this.rota.filtroFase);
+    // Filtrar por fase sem os dados lidos devolveria lista vazia com a mensagem
+    // "nenhum parcelamento com esse filtro" — outra afirmação sem base. Com a
+    // carga pendente, o filtro não corta.
+    if (this.rota.filtroFase && this.regularizacaoLida) {
+      base = base.filter((p) => this._faseDe(p.id) === this.rota.filtroFase);
+    }
     const filtrados = filtrarPorTexto(base, this.termoBusca, ['nome', 'slug']);
 
     // Situação registral só vira faixa de chips onde ela existe nos dados —
@@ -1791,7 +1865,8 @@ export class AppReg360 extends LitElement {
           : html`
             <urbi-grid min="260px" gap="12px">
               ${filtrados.map((p) => {
-                const b = badgeFase(this._faseDe(p.id));
+                const fase = this._faseDe(p.id);
+                const b = fase === null ? BADGE_FASE_NAO_LIDA : badgeFase(fase);
                 const sit = this.regularizacaoPorParcelamento.get(Number(p.id))?.situacao_registral;
                 const setor = this._nomeSetor(p.setor_habitacional_id);
                 const ag = this.porParcelamento.get(Number(p.id));
@@ -1909,10 +1984,10 @@ export class AppReg360 extends LitElement {
       <urbi-botao variante="fantasma" icone="fa-solid fa-arrow-left" pequeno @click=${() => this._navegar('/')}>Voltar</urbi-botao>
       <h2>${nomeDe(sh)}</h2>
       <urbi-wrap>
-        <urbi-kpi rotulo="Parcelamentos" .valor=${this.parcelamentos.length} formato="numero"></urbi-kpi>
+        <urbi-kpi rotulo="Parcelamentos" .valor=${this._rotuloParcelamentos(this.parcelamentos.length)} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Lotes" .valor=${this._rotuloLotes(ag.quantidade)} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Área dos lotes (m²)" .valor=${this._rotuloAreaDosLotes(ag.area)} formato="texto"></urbi-kpi>
-        <urbi-kpi rotulo="Propostas aprovadas" .valor=${this.propostas.filter((p) => p.status_aprovacao === 'aprovada').length} formato="numero"></urbi-kpi>
+        <urbi-kpi rotulo="Propostas aprovadas" .valor=${this._rotuloCarga(this.propostas.filter((p) => p.status_aprovacao === 'aprovada').length)} formato="texto"></urbi-kpi>
       </urbi-wrap>
       ${this._renderVgv(somarAgregados(this.parcelamentos.map((p) => this._agregadoDoParcelamento(p.id))))}
       ${this.parcelamentosSemSetor.length > 0
@@ -1962,7 +2037,8 @@ export class AppReg360 extends LitElement {
     const p = this.detalhe;
     if (!p) return html`<urbi-loading></urbi-loading>`;
     const reg = this.regularizacaoPorParcelamento.get(Number(p.id)) || {};
-    const fase = badgeFase(this._faseDe(p.id));
+    const faseBruta = this._faseDe(p.id);
+    const fase = faseBruta === null ? BADGE_FASE_NAO_LIDA : badgeFase(faseBruta);
     const bNucleo = badgeStatusParcelamento(p.status);
     const setor = this._nomeSetor(p.setor_habitacional_id);
     const areaLotes = this.lotes.reduce((soma, l) => soma + (Number(l.area_efetiva ?? l.area ?? 0) || 0), 0);
@@ -1979,7 +2055,7 @@ export class AppReg360 extends LitElement {
       </urbi-wrap>
       <div class="prop-meta">
         ${p.slug ?? ''} · Nº Decreto: <strong>${reg.numero_decreto || '—'}</strong>
-        · Matrícula-mãe: ${mat ? nomeDe(mat) : (reg.matricula_id ? '…' : '—')}
+        · Matrícula-mãe: ${rotuloReferencia(mat ? nomeDe(mat) : null, reg.matricula_id)}
         · Registro no Núcleo: ${bNucleo.label}
       </div>
       ${this.podeEditarRegularizacao
@@ -2072,7 +2148,7 @@ export class AppReg360 extends LitElement {
           { id: 'endereco', label: 'Endereço', valor: (l: any) => nomeDe(l) },
           { id: 'matricula', label: 'Matrícula', valor: (l: any) => {
               const m = this.matriculasPorId.get(Number(l.matricula_id));
-              return m ? nomeDe(m) : (l.matricula_id ? '…' : '—');
+              return rotuloReferencia(m ? nomeDe(m) : null, l.matricula_id);
             } },
           { id: 'area', label: 'Área (m²)', alinhamento: 'direita', valor: (l: any) => fmtArea(l.area_efetiva ?? l.area) },
           { id: 'pessoas', label: 'Pessoas', render: (l: any) => {
@@ -2187,7 +2263,7 @@ export class AppReg360 extends LitElement {
       ${this._renderPainelPrecos(u)}
       <urbi-wrap>
         <urbi-kpi rotulo="Área (m²)" .valor=${fmtArea(u.area_efetiva ?? u.area)} formato="texto"></urbi-kpi>
-        <urbi-kpi rotulo="Matrícula" .valor=${mat ? nomeDe(mat) : '—'} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Matrícula" .valor=${rotuloReferencia(mat ? nomeDe(mat) : null, u.matricula_id)} formato="texto"></urbi-kpi>
       </urbi-wrap>
       ${this.unidadesDoLote.length > 0
         ? html`

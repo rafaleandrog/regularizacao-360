@@ -113,6 +113,10 @@ Esse segundo caso já mordeu: a guarda original olhava só para "está correndo"
 
 Depois da primeira varredura, o cache serve o resto da sessão: voltar para a home não repete as 32 requisições.
 
+**A carga da view tem os mesmos três estados**, e por um motivo próprio: ela é **sequencial**. Na home, `setores` carrega antes de `parcelamentos` — se o segundo falha, o primeiro já está populado e a tela renderiza os cards, cada um contando sobre uma lista vazia. Sem a marca `cargaFalhou`, eles diriam "0 parcelamentos" com apenas um banner genérico a contradizê-los.
+
+`erro` e `cargaFalhou` são coisas diferentes de propósito: o primeiro alimenta o banner, o segundo impede a tela de **afirmar** sobre uma base que ela não leu. Um banner acima não desfaz uma frase abaixo.
+
 ## Quando a flag está desligada
 
 Os dois `403` do gate têm causas opostas e remédios diferentes:
