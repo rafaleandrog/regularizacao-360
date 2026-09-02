@@ -59,7 +59,11 @@ Os descontos são acumulativos: o de lote grande soma-se ao da forma de pagament
 
 A função está escrita e testada, mas **a tela ainda não a chama** — e agora o motivo é mais preciso que "o catálogo não existe".
 
-O catálogo existe: `comum/catalogos.ts`. O que não existe é o **mapeamento de família** de cada uso, porque os valores de Uso nunca foram levantados (issue #22). `familiaDoUso()` devolve `null` para todos hoje, e passando `null` a checagem não roda — melhor não checar do que checar contra a família errada.
+O catálogo existe: `comum/catalogos.ts`, e o único uso conhecido já tem família — **`CSIIR`** (*Comercial, Serviços, Industrial, Institucional e Residencial*) é uso misto, e vai para **`comercial_misto`**.
+
+Que a sigla termine em "Residencial" não a torna residencial: uso misto admite residência entre outros usos, e o piso aplicável é o do conjunto. A família foi respondida por quem define o piso, não derivada da leitura da sigla — e é assim que tem de ser, porque a sigla sugere o contrário.
+
+O que ainda falta para ligar a checagem na tela é o **dado**: `uso` não tem onde morar (#19/#20/#21 paradas, porque o destino é o Lote do Núcleo e o campo ainda não chegou lá). Sem `uso` no imóvel, não há o que passar para `familiaDoUso()`.
 
 ### O `null` da família é perigoso, e por isso é visível
 

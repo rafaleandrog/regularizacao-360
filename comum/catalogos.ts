@@ -4,10 +4,14 @@
  *
  * ## A decisão que este arquivo registra: texto livre, não `opcoes`
  *
- * A issue #22 pedia uma lista fechada. Ela **não pôde ser fechada**: o único
- * valor de Uso que se sabe existir é `CSIIR`, lido do badge azul da tela do
- * legado, e **ninguém levantou o que a sigla significa** nem qual é o resto da
- * lista. Tipo de Lote aparece vazio (`—`) em todas as capturas.
+ * A issue #22 pedia uma lista fechada. Ela **não pôde ser fechada**: `CSIIR` —
+ * lido do badge azul da tela do legado — é o único valor de Uso **observado**,
+ * e observado não é o mesmo que único. Nada garante que não haja outros na
+ * base. Tipo de Lote aparece vazio (`—`) em todas as capturas, sem um único
+ * valor conhecido.
+ *
+ * O significado do `CSIIR` e a família dele **foram levantados** (ver o
+ * catálogo abaixo); o que continua aberto é se a lista tem mais valores.
  *
  * Diante disso, a própria #22 previa o caminho: *"Se a lista não puder ser
  * fechada agora, decidir explicitamente por texto livre com sugestões em vez de
@@ -36,7 +40,8 @@
  * **desligada, com cara de aprovação**. Por isso `familia` é campo obrigatório
  * da entrada e aceita `null` explícito — `null` significa *"não levantado"*, e
  * `usosSemFamilia` existe para a tela poder dizer isso em voz alta em vez de
- * deixar passar. Mesmo princípio de `tiposDesconhecidos` em
+ * deixar passar. Hoje nenhuma entrada está com `null`, mas a guarda continua
+ * valendo para todo valor que chegar do dado e não estiver aqui. Mesmo princípio de `tiposDesconhecidos` em
  * `transacoes-contrato.ts`: o descarte é legítimo, o silêncio não.
  *
  * ## Onde o dado mora — questão aberta, e de propósito
@@ -66,8 +71,17 @@ export type { FamiliaPiso };
 export interface EntradaCatalogo {
   /** O valor como ele chega do dado. Comparação é exata, nunca por substring. */
   valor: string;
-  /** Rótulo humano para a tela. */
+  /** Rótulo humano para a tela. Curto — é o que cabe num badge de tabela. */
   rotulo: string;
+  /**
+   * O que a sigla significa, por extenso.
+   *
+   * Opcional porque valor autoexplicativo não precisa. Mas **sigla sem
+   * expansão registrada em lugar nenhum era metade do problema da #22**: o
+   * badge dizia `CSIIR` e ninguém no projeto sabia o que era. Onde houver
+   * sigla, isto é obrigatório na prática.
+   */
+  descricao?: string;
   /** Cor do badge. Mapa exato — classificar por substring faz um valor vestir o badge do outro. */
   cor: CorBadge;
   /**
@@ -83,24 +97,30 @@ export interface EntradaCatalogo {
 /**
  * Catálogo de Uso.
  *
- * **Uma entrada só, e ela é a pergunta em aberto.** `CSIIR` é o único valor
- * observado — no badge azul da tela do legado —, e o significado da sigla nunca
- * foi levantado. Ele está aqui em vez de fora porque o valor **existe no dado
- * real**: omiti-lo faria a tela tratá-lo como desconhecido sem registrar que
- * sabemos da existência dele e não do sentido.
+ * **Uma entrada, e ela está completa.** `CSIIR` é o único valor observado — no
+ * badge azul da tela do legado —, e o significado foi levantado com o Ricardo:
+ * *Comercial, Serviços, Industrial, Institucional e Residencial*. É uma
+ * categoria de **uso misto**, e é o próprio Ricardo quem a classifica como
+ * `comercial_misto` para efeito de piso.
  *
- * A família fica `null` de propósito. Chutar entre residencial e
- * comercial/misto decidiria, em massa, se milhares de lotes respeitam o piso —
- * e o erro seria invisível, porque um piso checado contra a família errada
- * responde com a mesma confiança de um certo.
+ * A sigla incluir "Residencial" no final não a torna residencial: uso misto
+ * admite residência entre outros usos, e o piso que se aplica é o do conjunto.
+ * A família não foi derivada da leitura da sigla — foi respondida por quem
+ * define o piso.
+ *
+ * **Uma entrada não significa lista fechada.** Nada garante que este seja o
+ * único valor de Uso na base; ele é o único **observado**. Valor que aparecer
+ * fora daqui é aceito (a coluna é texto livre) e cai em `usosSemFamilia`, onde
+ * fica visível em vez de desligar a checagem de piso em silêncio.
  */
 export const CATALOGO_USO: readonly EntradaCatalogo[] = [
   {
     valor: 'CSIIR',
     rotulo: 'CSIIR',
+    descricao: 'Comercial, Serviços, Industrial, Institucional e Residencial',
     cor: 'info',
-    familia: null,
-    origem: 'Badge azul da tela do legado (issue #22). Significado da sigla não levantado.',
+    familia: 'comercial_misto',
+    origem: 'Badge azul da tela do legado. Significado e família respondidos pelo Ricardo na issue #22.',
   },
 ];
 
@@ -140,6 +160,14 @@ export function rotuloDeUso(valor: unknown): string | null {
   const bruto = String(valor ?? '').trim();
   if (!bruto) return null;
   return entradaDeUso(bruto)?.rotulo ?? bruto;
+}
+
+/**
+ * O significado por extenso, quando há. `null` para valor sem sigla a expandir
+ * — e para valor desconhecido, que é justamente o caso em que não sabemos.
+ */
+export function descricaoDeUso(valor: unknown): string | null {
+  return entradaDeUso(valor)?.descricao ?? null;
 }
 
 /** Cor do badge de Uso. Valor fora do catálogo fica neutro, nunca colorido por chute. */
