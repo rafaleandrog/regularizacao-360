@@ -78,7 +78,7 @@ O script não decide qual valor vale. Ele mostra os dois e deixa a decisão com 
 
 **Uso e Tipo de Lote.** O catálogo (#22) não fechou, e a decisão é que esses campos vão morar no objeto **Lote do Núcleo**, não numa tabela do app. Gravá-los agora criaria uma segunda fonte da verdade para o mesmo dado. As linhas vão para o relatório.
 
-**Transação.** A entidade não existe no Núcleo (#36). Linhas com status comercial vão para o relatório de pendências, em vez de sumir: descartar em silêncio faria o import parecer completo e deixaria o dado comercial para trás sem ninguém saber.
+**Transação.** A entidade **existe** no Núcleo (`transacoes`, SDK 52), mas o importador ainda não a escreve — o mapeamento dos status comerciais do Planilhão para os tipos do Núcleo depende de reconciliar o catálogo (**#80**). Até lá, linhas com status comercial vão para o relatório de pendências, em vez de sumir: descartar em silêncio faria o import parecer completo e deixaria o dado comercial para trás sem ninguém saber.
 
 ## Pré-requisitos
 

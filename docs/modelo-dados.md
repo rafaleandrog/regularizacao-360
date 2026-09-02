@@ -66,7 +66,7 @@ O polo (`up_contra` / `contra_up`) é dado, não texto: os títulos do legado ca
 
 ## O que **não** virou tabela
 
-**Transação.** A entidade não existe no Núcleo, e criar uma cópia dela aqui seria o pior desfecho: no dia em que o Núcleo publicasse a dele, a UP teria duas. O que existe é um **adaptador com interruptor** — ver [transacao-integracao.md](transacao-integracao).
+**Transação.** A entidade **existe no Núcleo** (`transacoes`), e é por isso que o app nunca criou uma cópia dela aqui: uma tabela própria teria virado a segunda Transação da UP no dia em que esta chegasse. O que existe é um **adaptador com interruptor**, ainda desligado — ver [transacao-integracao.md](transacao-integracao) e a **#80**.
 
 **Uso e Tipo de Lote.** Vão morar no objeto **Lote do Núcleo**. Criar as colunas em `imovel_dados` agora daria uma segunda fonte da verdade para o mesmo dado, exatamente o que esta página inteira existe para evitar. As issues #19, #20 e #21 precisam ser reescritas nesse sentido.
 

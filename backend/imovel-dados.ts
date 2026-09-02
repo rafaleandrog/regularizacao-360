@@ -11,10 +11,10 @@ import { semCamposProtegidos } from '../comum/quitacao.js';
  * catálogo da issue #22 estiver fechado; `quitado` na #35.
  *
  * O **preço estático** tem regra própria e é por isso que ele não divide rota
- * com o resto: ele é o registro de um contrato firmado — enquanto a entidade
- * Transação não existe no Núcleo, é o único lugar onde o valor combinado
- * sobrevive. Se puder ser sobrescrito por engano, o campo perde inteiramente o
- * propósito.
+ * com o resto: ele é o registro de um contrato firmado — enquanto a integração
+ * com as Transações do Núcleo não estiver ligada (#80), é o único lugar onde o
+ * valor combinado sobrevive. Se puder ser sobrescrito por engano, o campo perde
+ * inteiramente o propósito.
  */
 
 const TIPOS = new Set(['lote', 'unidade']);
