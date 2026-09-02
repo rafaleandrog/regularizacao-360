@@ -83,7 +83,7 @@ npm run registrar     # regenera apps.json (o shell descobre a app)
 
 ## Dependência externa — Transação
 
-A entidade **ainda não existe no Núcleo**, e o app está preparado num adaptador de três arquivos com interruptor único. A aba Transações explica o que falta em vez de mostrar botão morto; as rotas respondem `501` com código semântico.
+A entidade **existe no Núcleo** (`transacoes`, confirmado no SDK publicado 52), mas o app ainda **não a consome**: o adaptador de três arquivos segue com o interruptor desligado, a aba Transações explica o que falta em vez de mostrar botão morto, e as rotas respondem `501` com código semântico. Ligar é a **#80**, e precisa de instância — não de release novo.
 
 **O VGV não depende disso** — ele é calculado e aparece hoje. (Este doc afirmava o contrário até o PR #58; a afirmação vinha do desenho original, em que o VGV sairia de contratos assinados.)
 

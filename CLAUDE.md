@@ -85,7 +85,7 @@ Boa parte do desenho atual existe para driblar limitações do Núcleo que valia
 | Existe rota de **pessoa → imóveis**? | A tela de Moradores foi desenhada inteira em volta da ausência dela: recorte escolhido pelo usuário, e três estados de situação em vez de dois. Ver `docs/moradores.md` |
 | `GET /pessoas` expande **contatos** na listagem? | Cai a requisição por linha para telefone e email |
 | `parcelamentos.setor_habitacional_id` e `lotes.parcelamento_id` estão **preenchidos**? | É a #13. Se estiverem nulos, a navegação não anda e a Onda 1 vira importação antes de tela |
-| A entidade **Transação** existe? | O adaptador está pronto: liga-se o interruptor. Roteiro em `docs/transacao-integracao.md` |
+| ~~A entidade **Transação** existe?~~ **Existe** (SDK 52) | Conferido. O adaptador está pronto e desligado; ligar é a **#80** — e o catálogo de tipos do app precisa bater com `GET /transacoes/tipos` antes, senão o badge de estágio some calado. Roteiro em `docs/transacao-integracao.md` |
 
 **Duas coisas que NÃO relaxam com a atualização:**
 

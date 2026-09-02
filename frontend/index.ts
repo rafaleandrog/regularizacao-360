@@ -2824,8 +2824,8 @@ export class AppReg360 extends LitElement {
       </urbi-wrap>
       ${this.transacoes.length === 0
         ? html`<urbi-estado-vazio icone="fa-solid fa-file-signature"
-            mensagem=${transacaoDisponivel() ? 'Nenhuma transação neste imóvel' : 'Transações ainda não existem no Núcleo'}
-            submensagem=${transacaoDisponivel() ? '' : 'A tela já sabe montar: quando a entidade existir, ela aparece aqui sem mudança de código.'}></urbi-estado-vazio>`
+            mensagem=${transacaoDisponivel() ? 'Nenhuma transação neste imóvel' : 'Integração de Transações não ligada'}
+            submensagem=${transacaoDisponivel() ? '' : 'A entidade existe no Núcleo; falta ligar a integração deste app. A tela já sabe montar — quando ligar, aparece aqui sem mudança de código.'}></urbi-estado-vazio>`
         : html`<urbi-tabela
             .colunas=${[
               { id: 'tipo', label: 'Tipo', valor: (t: any) => t.tipo },

@@ -1,13 +1,22 @@
 /**
  * Contrato de Transação (reg360) — o formato que o app espera, num lugar só.
  *
- * **A entidade Transação ainda não existe no Núcleo.** Este arquivo não é
- * antecipação gratuita: sem ele, o formato dela vazaria por costuras espalhadas
- * — uma rota `501` aqui, um `dot` codificado no template ali —, e ligar a
- * Transação depois viraria caçar referências em vez de trocar um adaptador.
+ * **A entidade Transação EXISTE no Núcleo** (`transacoes`, confirmado no bundle
+ * do SDK 52) — o que não está ligado é este app. Este arquivo foi escrito
+ * antes disso, e a aposta se pagou: sem ele, o formato dela vazaria por
+ * costuras espalhadas — uma rota `501` aqui, um `dot` codificado no template
+ * ali —, e ligar a Transação viraria caçar referências em vez de trocar um
+ * adaptador.
  *
  * O interruptor é `DISPONIVEL`. Trocá-lo para `true` não deve exigir mexer em
  * tela nenhuma: só ligar o adaptador ao Núcleo.
+ *
+ * **Mas não é só trocar o booleano.** `TIPOS_TRANSACAO`, abaixo, foi escrito
+ * quando não havia com o que conferir; o Núcleo tem o descritor como fonte
+ * única em `GET /transacoes/tipos`. Se as duas listas divergirem, tipo
+ * desconhecido é DESCARTADO em silêncio (ver `tipoMaisAvancado`) e o badge de
+ * estágio some de todos os lotes sem erro nenhum. Reconciliar é pré-requisito
+ * da virada — issue #80.
  */
 
 /** O interruptor. Enquanto for `false`, o app diz o que falta em vez de errar. */
@@ -91,7 +100,7 @@ export interface Transacao {
   partes?: ParteTransacao[];
 }
 
-/** Resposta do adaptador enquanto a fonte não existe. */
+/** Resposta do adaptador enquanto a integração não está ligada. */
 export interface Indisponivel {
   disponivel: false;
   codigo: 'REG360_TRANSACAO_INDISPONIVEL';
@@ -101,7 +110,11 @@ export interface Indisponivel {
 export const INDISPONIVEL: Indisponivel = {
   disponivel: false,
   codigo: 'REG360_TRANSACAO_INDISPONIVEL',
-  mensagem: 'A entidade Transação ainda não existe no Núcleo. '
+  // A entidade EXISTE no Núcleo (`transacoes`, SDK 52) — quem não está ligado é
+  // este app. Dizer "não existe no Núcleo", como esta mensagem dizia até a #80
+  // ser aberta, mandava o leitor cobrar a plataforma por algo que ela já
+  // entregou, e escondia que a pendência é daqui.
+  mensagem: 'A integração com as Transações do Núcleo ainda não está ligada neste app. '
     + 'Enquanto isso, o preço de contrato do imóvel é o registro do valor combinado.',
 };
 

@@ -50,9 +50,9 @@ O app não valida CPF, telefone nem email: quem normaliza e recusa é o Núcleo,
 
 É marca, não cálculo: o saldo devedor vive na base do financeiro, fora do escopo. Ver [quitacao.md](quitacao).
 
-## Fluxo 5 — Registrar transação *(preparado, aguardando o Núcleo)*
+## Fluxo 5 — Registrar transação *(preparado, aguardando a virada na instância)*
 
-A entidade Transação **ainda não existe no Núcleo**. O que existe é um adaptador de três arquivos com um **interruptor único** (`DISPONIVEL`): quando ela existir, liga-se o adaptador e nenhuma tela muda.
+A entidade Transação **existe no Núcleo** (`transacoes`, SDK 52), e o adaptador de três arquivos continua **desligado** no interruptor único (`DISPONIVEL`). Ligá-lo não muda tela nenhuma — mas não é só trocar o booleano: os tipos que o app conhece foram escritos antes de haver com o que conferir, e precisam bater com `GET /transacoes/tipos`. Ver **#80**.
 
 A aba **Transações** no lote não tem botão morto — ela explica o que falta e diz onde o valor combinado está sendo guardado enquanto isso (o preço de contrato). As três datas de assinatura já aparecem, com `—`, porque a tela já sabe montá-las. Ver [transacao-integracao.md](transacao-integracao).
 

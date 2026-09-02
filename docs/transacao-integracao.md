@@ -6,7 +6,7 @@ tipo:
 
 # Integração de Transação
 
-> A entidade Transação **ainda não existe no Núcleo**. Este doc é o roteiro do dia em que ela existir, escrito enquanto o contexto está fresco — não depois, quando ninguém lembrar por que as costuras estão onde estão.
+> A entidade Transação **já existe no Núcleo** (`transacoes`, confirmado no bundle do SDK 52) — e o adaptador continua **desligado**. Este doc é o roteiro da virada, escrito enquanto o contexto estava fresco; a **#80** carrega o que ele não previu, por ter sido escrito antes de a entidade existir. Leia os dois.
 
 ## O interruptor
 

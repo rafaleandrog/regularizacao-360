@@ -101,9 +101,13 @@ As seis tabelas do schema `reg360` e **por que cada uma existe fora do Núcleo**
 
 Sem FK direta para o Núcleo — apenas referência lógica por ID, acessada via `req.nucleo` (backend) e `urbiVerso.nucleo()` (frontend).
 
-## Transação (dependência futura do Núcleo)
+## Transação (entidade existe; integração desligada)
 
-A entidade Transação ainda não existe no Núcleo. O app está preparado para ela num **adaptador de três arquivos**, com um interruptor único (`DISPONIVEL`): as derivações de data de assinatura e de estágio já estão escritas e testadas com dados sintéticos, e a aba do lote explica o que falta em vez de mostrar botão morto. O roteiro do dia da virada — inclusive o que **não** fazer com o `preco_estatico` — está em [transacao-integracao.md](transacao-integracao).
+**A entidade Transação existe no Núcleo** — `transacoes`, pilha append-only que liga pessoas a imóveis. Confirmado no bundle do `@urbiverso/sdk` **52.0.0** (`docs/nucleo.md`), que é a referência de autoridade para sessão de app.
+
+**A integração ainda está desligada.** O app tem um **adaptador de três arquivos** com interruptor único (`DISPONIVEL`, hoje `false`): as derivações de data de assinatura e de estágio estão escritas e testadas com dados sintéticos, e a aba do lote explica o que falta em vez de mostrar botão morto. Ligar depende de instância — o catálogo de tipos do app é anterior à entidade e precisa ser reconciliado com `GET /transacoes/tipos` antes da virada, senão o badge de estágio some de todos os lotes em silêncio. É a **#80**.
+
+O roteiro do dia — inclusive o que **não** fazer com o `preco_estatico` — está em [transacao-integracao.md](transacao-integracao).
 
 ## Estado atual
 
@@ -114,8 +118,7 @@ Falta o que depende de coisas fora daqui:
 | Pendência | Depende de |
 |---|---|
 | Catálogo de **Uso** e **Tipo de Lote** | Definição do negócio — e o destino é o objeto Lote do Núcleo, não uma tabela daqui |
-| **Transação** | A entidade existir no Núcleo. O adaptador está pronto, com interruptor único |
+| **Transação** | A entidade **já existe** no Núcleo (SDK 52). Falta reconciliar os tipos e ligar o interruptor, na instância — **#80** |
 | **Release e QA** na instância intermediária | Instalação na Pinguim |
-| ~~`pnpm-lock.yaml` e piso de `sdk_min`~~ | **Resolvido** — lockfile versionado, `sdk_min: 52` e `shell_min: "0.53.10"` declarados |
 
 **Este doc é a fonte da verdade.** A spec v0.9 foi aposentada para [`historico/spec-v0.9.md`](historico/spec-v0.9) — ela registra as decisões e as datas, mas boa parte dela não descreve o app que existe.
