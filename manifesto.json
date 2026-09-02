@@ -19,26 +19,10 @@
     }
   },
   "nav": [
-    {
-      "titulo": "Regularização",
-      "rota": "/",
-      "icone": "fa-solid fa-city"
-    },
-    {
-      "titulo": "Parcelamentos",
-      "rota": "/parcelamentos",
-      "icone": "fa-solid fa-map"
-    },
-    {
-      "titulo": "Lotes",
-      "rota": "/lotes",
-      "icone": "fa-solid fa-house"
-    },
-    {
-      "titulo": "Moradores",
-      "rota": "/moradores",
-      "icone": "fa-solid fa-users"
-    }
+    { "titulo": "Regularização", "rota": "/", "icone": "fa-solid fa-city" },
+    { "titulo": "Parcelamentos", "rota": "/parcelamentos", "icone": "fa-solid fa-map" },
+    { "titulo": "Lotes", "rota": "/lotes", "icone": "fa-solid fa-house" },
+    { "titulo": "Moradores", "rota": "/moradores", "icone": "fa-solid fa-users" }
   ],
   "dependencias_nucleo": [
     "pessoas",
@@ -49,53 +33,22 @@
     "matriculas"
   ],
   "permissoes_nucleo": {
-    "pessoas": [
-      "ler",
-      "escrever"
-    ],
-    "imoveis": [
-      "ler",
-      "escrever"
-    ],
-    "setores_habitacionais": [
-      "ler"
-    ],
-    "parcelamentos": [
-      "ler",
-      "escrever"
-    ],
-    "incorporacoes": [
-      "ler"
-    ],
-    "matriculas": [
-      "ler",
-      "escrever"
-    ]
+    "pessoas": ["ler", "escrever"],
+    "imoveis": ["ler", "escrever"],
+    "setores_habitacionais": ["ler"],
+    "parcelamentos": ["ler", "escrever"],
+    "incorporacoes": ["ler"],
+    "matriculas": ["ler", "escrever"]
   },
   "eventos": {
     "proposta_criada": {
-      "campos": [
-        "proposta_id",
-        "titulo",
-        "nivel",
-        "tipo_proposta",
-        "preco_m2",
-        "data_proposta",
-        "data_fim_vigencia",
-        "criador"
-      ],
+      "campos": ["proposta_id", "titulo", "nivel", "tipo_proposta", "preco_m2", "data_proposta", "data_fim_vigencia", "criador"],
       "conteudo": "Nova proposta \"{titulo}\" ({tipo_proposta}) criada por {criador} — R$ {preco_m2}/m², vigência {data_proposta} a {data_fim_vigencia}",
       "api": "propostas/{proposta_id}",
       "rota": "proposta/{proposta_id}"
     },
     "proposta_aprovada": {
-      "campos": [
-        "proposta_id",
-        "titulo",
-        "nivel",
-        "tipo_proposta",
-        "aprovador"
-      ],
+      "campos": ["proposta_id", "titulo", "nivel", "tipo_proposta", "aprovador"],
       "conteudo": "Proposta \"{titulo}\" ({tipo_proposta}) aprovada por {aprovador}",
       "api": "propostas/{proposta_id}",
       "rota": "proposta/{proposta_id}"
