@@ -9,6 +9,7 @@ import {
   rotuloDeUso,
   corDeUso,
   familiaDoUso,
+  descricaoDeUso,
   usosSemFamilia,
   sugestoesDeUso,
   sugestoesDeTipoLote,
@@ -16,11 +17,25 @@ import {
 import { respeitaPiso } from '../../comum/preco.js';
 
 describe('catálogo de Uso — texto livre com sugestões, não enum', () => {
-  test('o único valor observado está registrado, e sem família', () => {
+  test('CSIIR está completo: significado, família e origem', () => {
     const e = entradaDeUso('CSIIR');
     assert.ok(e, 'CSIIR deveria estar no catálogo');
-    assert.equal(e.familia, null, 'família não foi levantada — não pode ser chutada');
+    assert.equal(e.familia, 'comercial_misto');
+    assert.equal(e.descricao, 'Comercial, Serviços, Industrial, Institucional e Residencial');
     assert.match(e.origem, /legado/i, 'toda entrada carrega de onde veio');
+  });
+
+  // A sigla termina em "Residencial", e uso misto NÃO é residencial para efeito
+  // de piso — quem respondeu foi quem define o piso, não a leitura da sigla.
+  test('CSIIR é comercial_misto, apesar do R no fim da sigla', () => {
+    assert.equal(familiaDoUso('CSIIR'), 'comercial_misto');
+    assert.notEqual(familiaDoUso('CSIIR'), 'residencial');
+  });
+
+  test('sigla com significado registrado — era metade do problema da #22', () => {
+    assert.ok(descricaoDeUso('CSIIR'));
+    // Valor desconhecido não inventa significado.
+    assert.equal(descricaoDeUso('INVENTADO'), null);
   });
 
   test('Tipo de Lote está vazio, e isso é um fato registrado', () => {
@@ -68,8 +83,7 @@ describe('rótulo e cor — desconhecido aparece, não some', () => {
 });
 
 describe('família de piso — o null que precisa ser visível', () => {
-  test('uso conhecido sem família e uso desconhecido dão o mesmo null', () => {
-    assert.equal(familiaDoUso('CSIIR'), null);
+  test('uso fora do catálogo não tem família', () => {
     assert.equal(familiaDoUso('INVENTADO'), null);
   });
 
@@ -77,17 +91,22 @@ describe('família de piso — o null que precisa ser visível', () => {
   // igual ao piso respeitado, e a tela não tem como distinguir.
   test('família nula faz respeitaPiso responder como se estivesse tudo bem', () => {
     const proposta = { preco_minimo_residencial: 180, preco_minimo_comercial_misto: 300 };
-    const semFamilia = respeitaPiso(10, proposta, familiaDoUso('CSIIR'));
+    const semFamilia = respeitaPiso(10, proposta, familiaDoUso('INVENTADO'));
     assert.deepEqual(semFamilia, { piso: null, abaixoDoPiso: false });
 
-    const comFamilia = respeitaPiso(10, proposta, 'residencial');
-    assert.equal(comFamilia.abaixoDoPiso, true, 'com família, R$10 está abaixo de R$180');
+    const comFamilia = respeitaPiso(10, proposta, familiaDoUso('CSIIR'));
+    assert.equal(comFamilia.piso, 300, 'CSIIR usa o piso comercial/misto, não o residencial');
+    assert.equal(comFamilia.abaixoDoPiso, true, 'R$10 está abaixo de R$300');
   });
 
-  test('usosSemFamilia lista os dois casos, sem repetir e em ordem estável', () => {
+  test('CSIIR não entra na lista de pendências — tem família', () => {
+    assert.deepEqual(usosSemFamilia(['CSIIR']), []);
+  });
+
+  test('usosSemFamilia lista só os desconhecidos, sem repetir e em ordem estável', () => {
     assert.deepEqual(
       usosSemFamilia(['CSIIR', 'COMERCIAL', 'CSIIR', 'ARMAZEM']),
-      ['ARMAZEM', 'COMERCIAL', 'CSIIR'],
+      ['ARMAZEM', 'COMERCIAL'],
     );
   });
 
