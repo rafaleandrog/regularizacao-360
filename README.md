@@ -25,7 +25,7 @@ scripts/         # importador do Planilhão (ferramenta de operação, não runt
 docs/            # documentação — comece pelo docs/README.md
 ```
 
-A lógica de negócio mora em `comum/`, e não nas rotas ou nas telas, porque é o que permite testá-la sem subir shell nem banco: os **261 testes** cobrem `comum/` e as partes puras do importador.
+A lógica de negócio mora em `comum/`, e não nas rotas ou nas telas, porque é o que permite testá-la sem subir shell nem banco: os **268 testes** cobrem `comum/` e as partes puras do importador.
 
 ## Desenvolvimento
 

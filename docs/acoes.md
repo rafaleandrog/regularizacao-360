@@ -88,11 +88,39 @@ A leitura é livre de propósito: quem enxerga o lote precisa saber que há lit�
 
 Desvincular confere que o vínculo é **daquela** ação. Sem essa checagem, quem conhece um id qualquer apaga vínculo de outra ação por uma URL montada à mão.
 
+## Vincular pessoas pela tela
+
+O formulário de ação tem um seletor de pessoas: busca no Núcleo, escolhidas viram cartões com o **papel** ao lado (`autor`, `réu`, `interessado`).
+
+**A busca é no servidor, não em lista carregada.** São ~2.873 pessoas na instância; `GET /pessoas` filtra por `busca` (ILIKE sobre nome, CPF e id legível) e pagina. O campo espera **duas letras** antes de disparar e tem 350 ms de debounce — sem isso, cada tecla vira uma requisição ao Núcleo. Resposta que chega depois de o termo já ter mudado é descartada: sem essa guarda, a busca lenta de "ana" sobrescreveria o resultado já exibido de "ana maria".
+
+**O papel é do vínculo, não da pessoa.** A mesma pessoa é ré numa ação e interessada em outra, por isso o seletor de papel fica no cartão do vínculo. Uma pessoa tem **um** papel por ação: `lerVinculosPessoa` deduplica por `pessoa_id`, então vincular a mesma pessoa duas vezes não daria erro — sumiria em silêncio. A tela impede antes, desabilitando o botão de quem já está na ação.
+
+### Criar e editar seguem caminhos diferentes, e é o protocolo que manda
+
+**Na criação**, os vínculos vão no mesmo corpo do `POST /acoes`, gravados numa transação só. Criar-e-vincular em duas chamadas deixaria ação órfã se a segunda falhasse.
+
+**Na edição não existe corpo que aceite vínculo** — `acao_pessoas` só tem criar e remover. Então trocar o papel de alguém é, no protocolo, **remover o vínculo e criar outro**. Quem compara só o conjunto de `pessoa_id` conclui que "não mudou nada" e o papel novo nunca é gravado: a pessoa continua vinculada, e a falha é ausência, não erro.
+
+Por isso o diff mora numa função pura e testada — `diffVinculosPessoa` em `comum/acoes.ts` —, que compara por `pessoa_id` **e** papel. A ordem que ela impõe também não é indiferente: **remover antes de adicionar**. Adicionar primeiro esbarraria no vínculo antigo, que a rota trata como idempotente e devolve intacto — e a troca de papel sumiria sem erro nenhum.
+
+Consequência para quem usa: editando, nada é gravado antes do **Salvar**. O formulário guarda a intenção; o rodapé diz isso.
+
+## Ações na tela da pessoa
+
+O detalhe do morador tem uma seção **Ações**, alimentada por `GET /acoes?pessoa_id=`, com os mesmos cartões da aba do lote.
+
+**O recorte é mais largo que o da aba do lote**: aqui entram também as ações **sem imóvel vinculado** — que são exatamente as que nenhuma tela de imóvel tem como mostrar.
+
+O `alvo` do título muda: na aba do lote é o imóvel, aqui é o nome da pessoa. O título continua saindo de `tituloAcao` (`comum/acoes.ts`), que é a única montagem que existe — remontar a string na tela é como as duas divergem no dia em que uma delas muda.
+
+**Mutação recarrega a lista do recorte aberto**, não sempre a do imóvel. Recarregar por imóvel na tela do morador não daria lista vazia: daria as ações do *imóvel de mesmo número* do id da pessoa.
+
 ## O que ainda não existe
 
-**Vincular pessoas pela tela.** A rota existe e é exercida pela listagem — os vínculos aparecem como chips com o papel —, mas escolher *quem* vincular depende de uma tela que liste pessoas, e ela é a de Moradores (issue #33). Enquanto isso, o formulário diz onde essa parte entra em vez de oferecer um controle que não teria como preencher.
+**Criar ação a partir da pessoa.** O backend aceita — `POST /acoes` exige ao menos um imóvel **ou** uma pessoa —, mas a tela do morador só lista. Registrar continua sendo pela aba Ações do imóvel.
 
-**Aba de Ações na pessoa.** Ação que existe só contra alguém, sem imóvel, não aparece em tela nenhuma hoje. Ela precisa da tela da pessoa — mesma issue #33.
+**Vincular outros imóveis pela tela.** A rota existe; o formulário não oferece o controle. Criando a partir do lote, o próprio lote já entra vinculado.
 
 ## Referência lógica que não resolve
 

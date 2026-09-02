@@ -9,6 +9,7 @@ import {
   lerVinculosImovel,
   lerVinculosPessoa,
   lerFiltroImovel,
+  diffVinculosPessoa,
 } from '../../comum/acoes.js';
 
 describe('badgeAcao — cor e rótulo por tipo, sem substring', () => {
@@ -145,5 +146,71 @@ describe('lerFiltroImovel — os dois campos, ou nenhum', () => {
 
   test('string vazia conta como ausente nos dois campos', () => {
     assert.deepEqual(lerFiltroImovel({ imovel_id: '', imovel_tipo: '' }), { filtro: null });
+  });
+});
+
+describe('diffVinculosPessoa — o que a edição precisa executar', () => {
+  test('sem mudança, nada a fazer', () => {
+    const d = diffVinculosPessoa(
+      [{ id: 7, pessoa_id: 1, papel: 'autor' }],
+      [{ pessoa_id: 1, papel: 'autor' }],
+    );
+    assert.deepEqual(d, { remover: [], adicionar: [] });
+  });
+
+  test('pessoa nova só adiciona; pessoa retirada só remove', () => {
+    const d = diffVinculosPessoa(
+      [{ id: 7, pessoa_id: 1, papel: 'autor' }],
+      [{ pessoa_id: 2, papel: 'reu' }],
+    );
+    assert.deepEqual(d.remover, [7]);
+    assert.deepEqual(d.adicionar, [{ pessoa_id: 2, papel: 'reu' }]);
+  });
+
+  // O caso que some sem erro se o diff comparar só pessoa_id: a pessoa continua
+  // vinculada, então "não mudou nada" — e o papel novo nunca é gravado.
+  test('trocar o papel vira remoção MAIS adição da mesma pessoa', () => {
+    const d = diffVinculosPessoa(
+      [{ id: 7, pessoa_id: 1, papel: 'autor' }],
+      [{ pessoa_id: 1, papel: 'reu' }],
+    );
+    assert.deepEqual(d.remover, [7]);
+    assert.deepEqual(d.adicionar, [{ pessoa_id: 1, papel: 'reu' }]);
+  });
+
+  test('papel ausente vale como interessado dos dois lados', () => {
+    assert.deepEqual(
+      diffVinculosPessoa([{ id: 7, pessoa_id: 1, papel: null }], [{ pessoa_id: 1 }]),
+      { remover: [], adicionar: [] },
+    );
+    assert.deepEqual(
+      diffVinculosPessoa([{ id: 7, pessoa_id: 1, papel: 'autor' }], [{ pessoa_id: 1 }]).adicionar,
+      [{ pessoa_id: 1, papel: 'interessado' }],
+    );
+  });
+
+  test('pessoa repetida no desejado vale a primeira, como lerVinculosPessoa', () => {
+    const d = diffVinculosPessoa([], [
+      { pessoa_id: 1, papel: 'autor' },
+      { pessoa_id: 1, papel: 'reu' },
+    ]);
+    assert.deepEqual(d.adicionar, [{ pessoa_id: 1, papel: 'autor' }]);
+  });
+
+  test('listas ausentes não quebram, e pessoa_id inválido é ignorado', () => {
+    assert.deepEqual(diffVinculosPessoa(null, undefined), { remover: [], adicionar: [] });
+    assert.deepEqual(
+      diffVinculosPessoa([], [{ pessoa_id: 0, papel: 'autor' }, { pessoa_id: NaN as any }]),
+      { remover: [], adicionar: [] },
+    );
+  });
+
+  test('do zero, tudo é adição', () => {
+    const d = diffVinculosPessoa([], [{ pessoa_id: 5, papel: 'reu' }, { pessoa_id: 6 }]);
+    assert.deepEqual(d.remover, []);
+    assert.deepEqual(d.adicionar, [
+      { pessoa_id: 5, papel: 'reu' },
+      { pessoa_id: 6, papel: 'interessado' },
+    ]);
   });
 });

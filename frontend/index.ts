@@ -47,6 +47,7 @@ import {
   POLOS,
   STATUS_ACAO,
   PAPEIS_PESSOA,
+  diffVinculosPessoa,
   type TipoAcao,
   type PapelPessoa,
 } from '../comum/acoes.js';
@@ -303,6 +304,33 @@ export class AppReg360 extends LitElement {
   @state() private buscaAcaoPessoa = '';
   @state() private formAcao: Record<string, any> | null = null;
 
+  /**
+   * Ações da pessoa aberta. Lista separada de `acoes` de propósito: as duas
+   * têm recortes diferentes (uma filtra por imóvel, outra por pessoa) e chegam
+   * por rotas diferentes. Uma lista só, reaproveitada, faria a tela do morador
+   * mostrar por um instante as ações do último lote visitado.
+   */
+  @state() private acoesDaPessoa: Acao[] = [];
+  @state() private carregandoAcoesDaPessoa = false;
+
+  /** Busca de pessoa dentro do formulário de ação. */
+  @state() private buscaPessoaAcao = '';
+  @state() private resultadoPessoaAcao: any[] = [];
+  @state() private buscandoPessoaAcao = false;
+
+  /**
+   * Nomes de pessoa já resolvidos, por id.
+   *
+   * O vínculo de ação guarda `pessoa_id` e o backend não lê o Núcleo, então o
+   * nome só existe onde a tela já o viu: nos ocupantes do lote, no resultado da
+   * busca do formulário, ou na pessoa aberta. Sem este cache, escolher alguém
+   * na busca e salvar mostraria o chip como `#123` até recarregar a página.
+   */
+  @state() private nomesDePessoa = new Map<number, string>();
+
+  /** Debounce da busca de pessoa. Timer não é estado de render. */
+  private _timerBuscaPessoa?: ReturnType<typeof setTimeout>;
+
   @state() private formAberto = false;
   @state() private formModo: 'criar' | 'copiar' = 'criar';
   @state() private formOrigemId: number | null = null;
@@ -403,7 +431,9 @@ export class AppReg360 extends LitElement {
         case 'morador':
           if (this.rota.id) {
             this.detalhe = await reg360Api.pessoa(this.rota.id);
+            this._aprenderNome(this.detalhe);
             await this._carregarContatos([this.detalhe]);
+            void this._carregarAcoesDaPessoa();
           }
           break;
         case 'setor':
@@ -884,6 +914,28 @@ export class AppReg360 extends LitElement {
   }
 
   /**
+   * Ações da pessoa aberta.
+   *
+   * `GET /acoes?pessoa_id=` já existe no backend e devolve os vínculos junto,
+   * como a rota do imóvel — a diferença é só o recorte. Aqui entram **todas**
+   * as ações em que a pessoa é parte, inclusive as que não têm imóvel nenhum
+   * vinculado: são exatamente as que a aba do lote não tem como mostrar.
+   */
+  private async _carregarAcoesDaPessoa() {
+    this.acoesDaPessoa = [];
+    if (!this.rota.id) return;
+    this.carregandoAcoesDaPessoa = true;
+    try {
+      const r = await reg360Api.listarAcoes({ pessoa_id: this.rota.id });
+      this.acoesDaPessoa = r?.dados || [];
+    } catch (e: any) {
+      this._registrarFalha(e, 'Falha ao carregar as ações desta pessoa');
+    } finally {
+      this.carregandoAcoesDaPessoa = false;
+    }
+  }
+
+  /**
    * Transações do imóvel, pelo adaptador. Ele devolve lista vazia quando a
    * entidade não existe, então não há caminho de erro a tratar aqui.
    */
@@ -929,15 +981,42 @@ export class AppReg360 extends LitElement {
       const achada = (lista || []).find((v: any) => Number(v.pessoa_id) === id);
       if (achada) return String(achada.nome ?? achada.razao_social ?? `#${id}`);
     }
+    const aprendido = this.nomesDePessoa.get(id);
+    if (aprendido) return aprendido;
     return `#${id}`;
   }
 
+  /**
+   * Guarda o nome de uma pessoa do Núcleo assim que a tela o vê.
+   *
+   * Chamado da pessoa aberta e de cada resultado da busca do formulário. É o
+   * que permite ao chip mostrar o nome de quem acabou de ser escolhido: o
+   * vínculo salvo devolve só `pessoa_id`, e `pessoasPorLote` não conhece
+   * ninguém fora do lote aberto.
+   */
+  private _aprenderNome(pessoa: any) {
+    const id = Number(pessoa?.id);
+    if (!Number.isInteger(id) || id < 1) return;
+    const nome = String(pessoa?.nome ?? pessoa?.razao_social ?? '').trim();
+    if (!nome) return;
+    if (this.nomesDePessoa.get(id) === nome) return;
+    this.nomesDePessoa = new Map(this.nomesDePessoa).set(id, nome);
+  }
+
+  /**
+   * Executa uma mutação de ação e recarrega **a lista do recorte aberto**.
+   *
+   * Recarregar sempre por imóvel apagaria a lista na tela do morador — o
+   * recorte de lá é por pessoa, e `_carregarAcoes` filtra por `imovel_id` com
+   * o id da rota, que ali é o id de uma PESSOA. O resultado não seria uma lista
+   * vazia honesta: seriam as ações do imóvel de mesmo número.
+   */
   private async _acaoDeAcao(fn: () => Promise<any>, sucesso: string) {
     try {
       this.carregando = true;
       await fn();
       urbiVerso.notificar?.(sucesso, 'sucesso');
-      await this._carregarAcoes();
+      await (this.rota.view === 'morador' ? this._carregarAcoesDaPessoa() : this._carregarAcoes());
     } catch (e: any) {
       urbiVerso.notificar?.(e?.message || 'Falha ao salvar a ação', 'erro');
     } finally {
@@ -951,8 +1030,18 @@ export class AppReg360 extends LitElement {
    * ao usuário que repita o que a tela já sabe.
    */
   private _abrirFormAcao(existente?: Acao) {
+    this.buscaPessoaAcao = '';
+    this.resultadoPessoaAcao = [];
+    this.buscandoPessoaAcao = false;
+    clearTimeout(this._timerBuscaPessoa);
     this.formAcao = existente
-      ? { ...existente, editandoId: existente.id }
+      ? {
+          ...existente,
+          editandoId: existente.id,
+          // Cópia: mexer no chip não pode alterar a `Acao` da lista antes de
+          // salvar — cancelar o formulário tem de deixar a tela como estava.
+          pessoas: (existente.pessoas || []).map((v) => ({ ...v })),
+        }
       : {
           tipo: 'revisional',
           polo: 'contra_up',
@@ -961,8 +1050,90 @@ export class AppReg360 extends LitElement {
           numero_processo: '',
           valor: '',
           descricao: '',
+          pessoas: [],
           editandoId: null,
         };
+  }
+
+  /**
+   * Busca de pessoa no Núcleo, com debounce.
+   *
+   * `GET /pessoas` pagina e filtra no servidor (`busca` é ILIKE sobre nome, CPF
+   * e id legível) — a lista inteira não cabe em memória, então não há filtro
+   * local a fazer. O debounce existe porque cada tecla seria uma requisição ao
+   * Núcleo, e duas letras é o mínimo em que o resultado começa a significar
+   * algo.
+   */
+  private _buscarPessoaAcao(termo: string) {
+    this.buscaPessoaAcao = termo;
+    clearTimeout(this._timerBuscaPessoa);
+    const alvo = termo.trim();
+    if (alvo.length < 2) {
+      this.resultadoPessoaAcao = [];
+      this.buscandoPessoaAcao = false;
+      return;
+    }
+    this.buscandoPessoaAcao = true;
+    this._timerBuscaPessoa = setTimeout(() => { void this._executarBuscaPessoa(alvo); }, 350);
+  }
+
+  private async _executarBuscaPessoa(termo: string) {
+    try {
+      const r: any = await reg360Api.pessoas({ busca: termo }, 1, 10);
+      // Resposta que chega depois de o usuário já ter digitado outra coisa é
+      // descartada: sem esta guarda, a busca lenta de "ana" sobrescreveria o
+      // resultado já exibido de "ana maria".
+      if (this.buscaPessoaAcao.trim() !== termo) return;
+      const lista: any[] = r?.dados || [];
+      for (const pessoa of lista) this._aprenderNome(pessoa);
+      this.resultadoPessoaAcao = lista;
+    } catch (e: any) {
+      urbiVerso.notificar?.(e?.message || 'Falha ao buscar pessoas', 'erro');
+      this.resultadoPessoaAcao = [];
+    } finally {
+      if (this.buscaPessoaAcao.trim() === termo) this.buscandoPessoaAcao = false;
+    }
+  }
+
+  /** Vínculos de pessoa que o formulário aberto tem no momento. */
+  private get _pessoasDoFormAcao(): Array<{ id?: number; pessoa_id: number; papel?: string }> {
+    return (this.formAcao?.pessoas || []) as Array<{ id?: number; pessoa_id: number; papel?: string }>;
+  }
+
+  private _adicionarPessoaNaAcao(pessoa: any) {
+    const f = this.formAcao;
+    if (!f) return;
+    const id = Number(pessoa?.id);
+    if (!Number.isInteger(id) || id < 1) return;
+    if (this._pessoasDoFormAcao.some((v) => Number(v.pessoa_id) === id)) {
+      // `lerVinculosPessoa` deduplica por pessoa_id — uma pessoa tem um papel
+      // só. Adicionar de novo não daria erro, apenas sumiria em silêncio.
+      urbiVerso.notificar?.('Essa pessoa já está nesta ação', 'erro');
+      return;
+    }
+    this._aprenderNome(pessoa);
+    this.formAcao = { ...f, pessoas: [...this._pessoasDoFormAcao, { pessoa_id: id, papel: 'interessado' }] };
+    this.buscaPessoaAcao = '';
+    this.resultadoPessoaAcao = [];
+  }
+
+  private _removerPessoaDaAcao(pessoaId: number) {
+    const f = this.formAcao;
+    if (!f) return;
+    this.formAcao = {
+      ...f,
+      pessoas: this._pessoasDoFormAcao.filter((v) => Number(v.pessoa_id) !== Number(pessoaId)),
+    };
+  }
+
+  private _mudarPapelNaAcao(pessoaId: number, papel: string) {
+    const f = this.formAcao;
+    if (!f) return;
+    this.formAcao = {
+      ...f,
+      pessoas: this._pessoasDoFormAcao.map((v) =>
+        Number(v.pessoa_id) === Number(pessoaId) ? { ...v, papel } : v),
+    };
   }
 
   private _salvarFormAcao() {
@@ -982,14 +1153,37 @@ export class AppReg360 extends LitElement {
     }
     const id = Number(this.rota.id);
     const editandoId = f.editandoId;
+    const desejadas = this._pessoasDoFormAcao.map((v) => ({ pessoa_id: Number(v.pessoa_id), papel: v.papel }));
+    const originais = editandoId
+      ? ((this.acoes.find((a) => a.id === Number(editandoId))
+          || this.acoesDaPessoa.find((a) => a.id === Number(editandoId)))?.pessoas || [])
+      : [];
     this.formAcao = null;
     void this._acaoDeAcao(
-      () => (editandoId
-        ? reg360Api.editarAcao(Number(editandoId), corpo)
-        // O imóvel aberto entra junto na criação — a rota exige ao menos um
-        // vínculo, e criar-e-vincular em duas chamadas deixaria ação órfã se a
-        // segunda falhasse.
-        : reg360Api.criarAcao({ ...corpo, imoveis: [{ imovel_id: id, imovel_tipo: String(this.rota.view) }] })),
+      async () => {
+        if (!editandoId) {
+          // Na criação os vínculos vão no MESMO corpo, numa transação só: a
+          // rota exige ao menos um vínculo, e criar-e-vincular em duas chamadas
+          // deixaria ação órfã se a segunda falhasse.
+          await reg360Api.criarAcao({
+            ...corpo,
+            imoveis: [{ imovel_id: id, imovel_tipo: String(this.rota.view) }],
+            pessoas: desejadas,
+          });
+          return;
+        }
+        await reg360Api.editarAcao(Number(editandoId), corpo);
+        // Na edição não há corpo que aceite vínculo: `acao_pessoas` só tem
+        // criar e remover, e trocar o papel de alguém é remover mais criar.
+        // A ordem é do diff e não é indiferente — ver `diffVinculosPessoa`.
+        const { remover, adicionar } = diffVinculosPessoa(originais as any, desejadas);
+        for (const vinculoId of remover) {
+          await reg360Api.desvincularPessoaDaAcao(Number(editandoId), vinculoId);
+        }
+        for (const v of adicionar) {
+          await reg360Api.vincularPessoaNaAcao(Number(editandoId), v.pessoa_id, v.papel);
+        }
+      },
       editandoId ? 'Ação atualizada' : 'Ação registrada',
     );
   }
@@ -2178,6 +2372,31 @@ export class AppReg360 extends LitElement {
               para ver os imóveis desta pessoa naquele recorte.`
           : this._renderImoveisDaPessoa(p)}
       </p>
+      ${this._renderAcoesDaPessoa(p)}
+    `;
+  }
+
+  /**
+   * Ações judiciais em que esta pessoa é parte.
+   *
+   * Mesmos cards da aba do lote, de propósito — `_renderCardAcao` é a única
+   * montagem de card, e o título sai de `tituloAcao`. O que muda é o `alvo`:
+   * aqui a parte contrária é a própria pessoa aberta, e não o imóvel.
+   *
+   * O recorte é mais largo que o da aba do lote: `GET /acoes?pessoa_id=`
+   * devolve também as ações **sem imóvel vinculado**, que são justamente as que
+   * não aparecem em tela nenhuma de imóvel.
+   */
+  private _renderAcoesDaPessoa(p: any): TemplateResult {
+    return html`
+      <p class="secao-titulo">Ações</p>
+      ${this.carregandoAcoesDaPessoa
+        ? html`<urbi-loading></urbi-loading>`
+        : this.acoesDaPessoa.length === 0
+          ? html`<urbi-estado-vazio icone="fa-solid fa-gavel"
+              mensagem="Nenhuma ação com esta pessoa"
+              submensagem="Ações são registradas a partir do lote, na aba Ações."></urbi-estado-vazio>`
+          : html`<urbi-stack>${this.acoesDaPessoa.map((a) => this._renderCardAcao(a, p))}</urbi-stack>`}
     `;
   }
 
@@ -2491,16 +2710,93 @@ export class AppReg360 extends LitElement {
         ${f.editandoId
           ? nothing
           : html`<p class="prop-meta">
-              Este imóvel já entra vinculado. Vincular pessoas e outros imóveis é feito
-              depois de criar — o vínculo com pessoa depende da tela de Moradores (issue #33)
-              para escolher quem.
+              Este imóvel já entra vinculado. Vincular <strong>outros imóveis</strong> é feito
+              depois de criar, na aba Ações do imóvel.
             </p>`}
+        ${this._renderPessoasDoFormAcao()}
         <div class="barra-acoes" style="margin-top:16px">
           <urbi-botao variante="fantasma" @click=${() => { this.formAcao = null; }}>Cancelar</urbi-botao>
           <urbi-botao variante="primario" ?carregando=${this.carregando}
             @click=${() => this._salvarFormAcao()}>Salvar</urbi-botao>
         </div>
       </urbi-modal>
+    `;
+  }
+
+  /**
+   * Seletor de pessoas do formulário de ação.
+   *
+   * **Por que não `urbi-seletor-objeto`**, que a #32 nomeia e que faz
+   * exatamente isto (debounce, dropdown, teclado): ele recebe um `endpoint` e o
+   * chama direto, por fora de `nucleo-cliente.ts` — que é a única porta de
+   * leitura do Núcleo nesta app, e não por preferência. A porta trata os dois
+   * 403 de flag: com `pessoas` desligada em `Admin → Apps → reg360 → Núcleo`, o
+   * primitivo mostraria um dropdown vazio, e o usuário leria "não existe" onde
+   * o certo é "o admin não liberou". Esse é o modo de falhar que o módulo
+   * existe para evitar. O preço pago aqui é navegação por teclado no resultado.
+   *
+   * Busca no Núcleo em vez de lista pré-carregada: são ~2.873 pessoas, e o
+   * `GET /pessoas` já filtra e pagina no servidor. Escolhida vira chip com o
+   * papel ao lado, porque papel é do VÍNCULO e não da pessoa — a mesma pessoa é
+   * ré numa ação e interessada em outra.
+   *
+   * Criando, os chips viajam no corpo da criação. Editando, cada mudança vira
+   * chamada às rotas de vínculo no Salvar — e é por isso que o rodapé avisa: o
+   * formulário guarda a intenção, e nada é gravado antes.
+   */
+  private _renderPessoasDoFormAcao(): TemplateResult {
+    const escolhidas = this._pessoasDoFormAcao;
+    const jaEscolhida = (id: unknown) => escolhidas.some((v) => Number(v.pessoa_id) === Number(id));
+    return html`
+      <p class="secao-titulo">Pessoas</p>
+      ${escolhidas.length === 0
+        ? html`<p class="prop-meta">Nenhuma pessoa vinculada. A ação pode ficar só com o imóvel.</p>`
+        : html`<urbi-stack>
+            ${escolhidas.map((v) => html`
+              <urbi-card>
+                <urbi-wrap>
+                  <strong>${this._nomeDaPessoa(v.pessoa_id)}</strong>
+                  <urbi-select label="Papel"
+                    .opcoes=${PAPEIS_PESSOA.map((pp) => ({ valor: pp, rotulo: ROTULO_PAPEL[pp] }))}
+                    .valor=${v.papel ?? 'interessado'}
+                    @urbi:select-change=${(e: CustomEvent) =>
+                      this._mudarPapelNaAcao(Number(v.pessoa_id), String(e.detail.valor))}></urbi-select>
+                  <urbi-botao variante="fantasma" pequeno icone="fa-solid fa-xmark"
+                    @click=${() => this._removerPessoaDaAcao(Number(v.pessoa_id))}>Remover</urbi-botao>
+                </urbi-wrap>
+              </urbi-card>`)}
+          </urbi-stack>`}
+
+      <urbi-input label="Buscar pessoa por nome, CPF ou identificador"
+        .valor=${this.buscaPessoaAcao}
+        @urbi:input-change=${(e: CustomEvent) => this._buscarPessoaAcao(String(e.detail.valor ?? ''))}></urbi-input>
+      ${this.buscaPessoaAcao.trim().length > 0 && this.buscaPessoaAcao.trim().length < 2
+        ? html`<p class="prop-meta">Digite ao menos duas letras.</p>`
+        : this.buscandoPessoaAcao
+          ? html`<urbi-loading></urbi-loading>`
+          : this.buscaPessoaAcao.trim().length >= 2 && this.resultadoPessoaAcao.length === 0
+            ? html`<p class="prop-meta">Nenhuma pessoa encontrada. Cadastrar é na aba Moradores.</p>`
+            : this.resultadoPessoaAcao.length > 0
+              ? html`<urbi-stack>
+                  ${this.resultadoPessoaAcao.map((pessoa) => html`
+                    <urbi-card>
+                      <urbi-wrap>
+                        <strong>${nomeDe(pessoa)}</strong>
+                        <span class="prop-meta">${String(pessoa?.cpf_formatado ?? pessoa?.cpf ?? pessoa?.id_legivel ?? `#${pessoa?.id}`)}</span>
+                        <urbi-botao variante="secundario" pequeno icone="fa-solid fa-plus"
+                          ?desabilitado=${jaEscolhida(pessoa?.id)}
+                          @click=${() => this._adicionarPessoaNaAcao(pessoa)}>
+                          ${jaEscolhida(pessoa?.id) ? 'Já vinculada' : 'Vincular'}</urbi-botao>
+                      </urbi-wrap>
+                    </urbi-card>`)}
+                </urbi-stack>`
+              : nothing}
+      ${this.formAcao?.editandoId
+        ? html`<p class="prop-meta">
+            Mudanças em pessoas só são gravadas no <strong>Salvar</strong> — e trocar o papel
+            de alguém é, no Núcleo desta app, remover o vínculo e criar outro.
+          </p>`
+        : nothing}
     `;
   }
 
