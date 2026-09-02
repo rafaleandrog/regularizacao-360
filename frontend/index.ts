@@ -8,6 +8,7 @@ import { mapaComLimite } from '../comum/concorrencia.js';
 import { precoAplicavel, valorDoImovel, aplicarDescontos, type FormaPagamento } from '../comum/preco.js';
 import {
   agregarImoveis, somarAgregados, indexarPropostas, chaveImovel, type Agregado,
+  estadoDaContagem, TEXTO_CONTAGEM,
 } from '../comum/agregados.js';
 import { badgeStatusParcelamento } from '../comum/status-parcelamento.js';
 import {
@@ -253,6 +254,12 @@ export class AppReg360 extends LitElement {
   /** Agregado por parcelamento, derivado da varredura de lotes. */
   @state() private porParcelamento = new Map<number, { quantidade: number; area: number }>();
   @state() private varrendoLotes = false;
+  /**
+   * A varredura falhou. Separado de `varrendoLotes` porque os dois juntos são
+   * o que distingue "ainda contando" de "não deu para contar" — e sem o
+   * segundo, falha vira `0 lotes` em toda a tela.
+   */
+  @state() private varreduraLotesFalhou = false;
   /** Todos os lotes da instância, para os agregados por parcelamento e setor. */
   @state() private todosOsLotes: any[] = [];
   /** Propostas vigentes indexadas por `nivel:ref_id`, e preços por imóvel. */
@@ -536,6 +543,7 @@ export class AppReg360 extends LitElement {
   private async _varrerLotes() {
     if (this.varrendoLotes || this.porParcelamento.size > 0) return;
     this.varrendoLotes = true;
+    this.varreduraLotesFalhou = false;
     try {
       const lotes = await reg360Api.lotes();
       this.todosOsLotes = lotes;
@@ -552,7 +560,10 @@ export class AppReg360 extends LitElement {
       void this._carregarBasesDoVgv();
     } catch (e: any) {
       // Falha aqui degrada a contagem, não a navegação — a tela continua
-      // utilizável sem os números.
+      // utilizável sem os números. Mas ela NÃO pode passar a exibir zero: o
+      // mapa fica vazio e `varrendoLotes` volta a false, então sem esta marca
+      // todo card diria "0 lotes" com cara de número apurado.
+      this.varreduraLotesFalhou = true;
       this._registrarFalha(e, 'Falha ao contar lotes');
     } finally {
       this.varrendoLotes = false;
@@ -1683,12 +1694,31 @@ export class AppReg360 extends LitElement {
   }
 
   /**
-   * A varredura de lotes é assíncrona: enquanto ela não termina, dizer
-   * "0 lotes" seria mentira. Distingue-se "ainda contando" de "nenhum".
+   * A varredura de lotes é assíncrona e pode falhar: dizer "0 lotes" é mentira
+   * nos dois casos. Distingue "ainda contando" e "não deu para contar" de
+   * "nenhum" — zero só é resposta depois de uma varredura que terminou bem.
    */
   private _rotuloLotes(quantidade: number): string {
-    if (this.varrendoLotes && this.porParcelamento.size === 0) return 'contando lotes…';
+    const texto = TEXTO_CONTAGEM[estadoDaContagem({
+      correndo: this.varrendoLotes,
+      falhou: this.varreduraLotesFalhou,
+    })];
+    if (texto) return texto;
     return `${quantidade.toLocaleString('pt-BR')} ${quantidade === 1 ? 'lote' : 'lotes'}`;
+  }
+
+  /**
+   * A área somada dos lotes sai do MESMO mapa da contagem, então herda os
+   * mesmos três estados. Sem esta guarda, a varredura que falha mostra
+   * "Área dos lotes: 0" ao lado de "contagem indisponível" — dois números da
+   * mesma fonte, um dizendo que não sabe e o outro afirmando zero.
+   */
+  private _rotuloAreaDosLotes(area: number): string {
+    const texto = TEXTO_CONTAGEM[estadoDaContagem({
+      correndo: this.varrendoLotes,
+      falhou: this.varreduraLotesFalhou,
+    })];
+    return texto ? '—' : fmtArea(area);
   }
 
   /** Nome do Setor a partir do id. Card nenhum exibe id cru. */
@@ -1881,7 +1911,7 @@ export class AppReg360 extends LitElement {
       <urbi-wrap>
         <urbi-kpi rotulo="Parcelamentos" .valor=${this.parcelamentos.length} formato="numero"></urbi-kpi>
         <urbi-kpi rotulo="Lotes" .valor=${this._rotuloLotes(ag.quantidade)} formato="texto"></urbi-kpi>
-        <urbi-kpi rotulo="Área dos lotes (m²)" .valor=${fmtArea(ag.area)} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Área dos lotes (m²)" .valor=${this._rotuloAreaDosLotes(ag.area)} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Propostas aprovadas" .valor=${this.propostas.filter((p) => p.status_aprovacao === 'aprovada').length} formato="numero"></urbi-kpi>
       </urbi-wrap>
       ${this._renderVgv(somarAgregados(this.parcelamentos.map((p) => this._agregadoDoParcelamento(p.id))))}
