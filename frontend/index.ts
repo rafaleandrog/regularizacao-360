@@ -23,7 +23,7 @@ import { soData, hoje, statusVigencia, type StatusVigencia } from '../comum/casc
 import {
   lerQuitacao, estadoDaQuitacao, TEXTO_QUITACAO, podeAlternarQuitacao,
 } from '../comum/quitacao.js';
-import { estadoDaLista, numeroLido } from '../comum/estado-lista.js';
+import { estadoDaLista, numeroLido, TEXTO_AUSENCIA, sufixoNumerosAntigos, badgeOuAvisoDeFalha } from '../comum/estado-lista.js';
 import { ABAS_TOPO } from '../comum/navegacao.js';
 import { paiDaUnidade, avisoDeHeranca } from '../comum/unidade-cadeia.js';
 import {
@@ -283,6 +283,14 @@ export class AppReg360 extends LitElement {
   @state() private leituraTransacoes: EstadoContagem = 'correndo';
   @state() private leituraMoradores: EstadoContagem = 'correndo';
   @state() private leituraLotesGlobais: EstadoContagem = 'correndo';
+  /**
+   * Leitura própria da tabela de lotes do Parcelamento — não `this.carregando`.
+   * A mesma tela liga `carregando` durante `_salvarRegularizacao`, `_acaoPreco`,
+   * `_acaoDeAcao` e o form de propostas, todos depois de os lotes já terem sido
+   * lidos. Derivar da flag global trocava "Nenhum lote com esse filtro" por
+   * "Carregando…" enquanto um modal salvava — os lotes já estavam ali.
+   */
+  @state() private leituraLotesDoParcelamento: EstadoContagem = 'correndo';
   /** Modal de preço: qual campo, valor e se é correção de contrato. */
   @state() private formPreco: { campo: 'estatico' | 'manual' | 'corrigir'; valor: string } | null = null;
   @state() private formRegAberto = false;
@@ -460,11 +468,12 @@ export class AppReg360 extends LitElement {
     // Sem o reset, a contagem lida no setor anterior sobreviveria a uma carga
     // que falha, e a tela afirmaria sobre uma base que ela não leu.
     this.totalParcelamentosInstancia = null;
-    // O alvo mudou, e `detalhe`, `propostas` e o contexto do imóvel ainda são
-    // do ANTERIOR. Sem zerar aqui — sincronamente, antes do primeiro `await` —
-    // a janela entre o clique e a resposta renderiza o cabeçalho, os KPIs e a
-    // lista de propostas de um objeto que já saiu da tela; e no caminho de
-    // falha eles ficam lá para sempre, sob o nome do objeto novo.
+    // O alvo mudou, e `detalhe`, `propostas`, a tabela de lotes do parcelamento
+    // e o contexto do imóvel ainda são do ANTERIOR. Sem zerar aqui —
+    // sincronamente, antes do primeiro `await` — a janela entre o clique e a
+    // resposta renderiza o cabeçalho, os KPIs, a lista de propostas e a tabela
+    // de lotes de um objeto que já saiu da tela; e no caminho de falha eles
+    // ficam lá para sempre, sob o nome do objeto novo.
     this.detalhe = null;
     this.propostas = [];
     this.vigente = null;
@@ -473,6 +482,7 @@ export class AppReg360 extends LitElement {
     this.unidadesDoLote = [];
     this.avisoHerancaUnidade = null;
     this.loteDaUnidade = null;
+    this.lotes = [];
     this.leituraPropostas = 'correndo';
     this.leituraDadosDoImovel = 'correndo';
     this.leituraContextoDoImovel = 'correndo';
@@ -535,7 +545,19 @@ export class AppReg360 extends LitElement {
             this.detalhe = await reg360Api.parcelamento(this.rota.id);
             // `parcelamento_id` É filtro válido em GET /lotes (ao contrário de
             // `unidades`, que nem tem essa coluna).
-            this.lotes = await reg360Api.lotes({ parcelamento_id: this.rota.id });
+            // Estado PRÓPRIO desta leitura — não `this.carregando`. A mesma tela
+            // liga `carregando` de novo depois, em `_salvarRegularizacao`,
+            // `_acaoPreco`, `_acaoDeAcao` e no form de propostas; derivar da
+            // flag global fazia a tabela voltar a "Carregando…" com os lotes
+            // já lidos, só porque um modal estava salvando.
+            this.leituraLotesDoParcelamento = 'correndo';
+            try {
+              this.lotes = await reg360Api.lotes({ parcelamento_id: this.rota.id });
+              this.leituraLotesDoParcelamento = 'concluida';
+            } catch (e) {
+              this.leituraLotesDoParcelamento = 'falhou';
+              throw e;
+            }
             await this._carregarPropostas('parcelamento', this.rota.id);
             void this._carregarMatriculas();
             void this._carregarPessoasDaPagina();
@@ -1494,11 +1516,15 @@ export class AppReg360 extends LitElement {
       for (const id of falhados) falhas.add(id);
       this.lotesComFalhaDePessoas = falhas;
     } catch (e: any) {
-      // O `catch` por item cobre o lote que falha; este cobre o que derruba a
-      // varredura inteira (`mapaComLimite`, ou a montagem do alvo). Sem ele a
-      // promessa é disparada com `void` e a rejeição não é tratada: os lotes
-      // ficam sem ocupante e sem marca de falha — de novo `—`, de novo igual a
-      // "sem ocupante".
+      // O `catch` por item (dentro do `mapaComLimite`) cobre o lote que falha
+      // sozinho; este cobre a falha CATASTRÓFICA — o próprio `mapaComLimite`
+      // rejeitando, ou a montagem do alvo — não item por item, porque aquele
+      // já não rejeita. Marcar todo `alvo` como falhado aqui não sobrescreve
+      // sucesso parcial algum: `pessoasPorLote` só é escrito DEPOIS de
+      // `resultados` resolver, e se caiu aqui é porque não resolveu. Sem este
+      // `catch` a promessa é disparada com `void` e a rejeição não é tratada:
+      // os lotes ficam sem ocupante e sem marca de falha — de novo `—`, de
+      // novo igual a "sem ocupante".
       const falhas = new Set(this.lotesComFalhaDePessoas);
       for (const l of alvo) falhas.add(Number(l.id));
       this.lotesComFalhaDePessoas = falhas;
@@ -2010,11 +2036,21 @@ export class AppReg360 extends LitElement {
       ${this.carregando && this.parcelamentos.length === 0
         ? html`<urbi-loading></urbi-loading>`
         : filtrados.length === 0
-          ? html`<urbi-estado-vazio
-              icone="fa-solid fa-map"
-              mensagem=${this.parcelamentos.length === 0 ? 'Nenhum parcelamento' : 'Nenhum parcelamento com esse filtro'}
-              submensagem=${this.parcelamentos.length === 0 ? '' : 'Ajuste a busca ou troque o setor.'}
-            ></urbi-estado-vazio>`
+          ? (() => {
+              // Mesmo defeito das outras seis listas: o `catch` de `_carregar`
+              // marca `cargaFalhou` sem tocar `this.parcelamentos`, e antes este
+              // render nunca consultava — "Nenhum parcelamento" saía igual para
+              // "não há nenhum" e para "a leitura falhou".
+              const e = estadoDaLista(estadoDaContagem({ correndo: this.carregando, falhou: this.cargaFalhou }), {
+                vazio: this.parcelamentos.length === 0 ? 'Nenhum parcelamento' : 'Nenhum parcelamento com esse filtro',
+                falhou: 'Não foi possível carregar os parcelamentos',
+              });
+              return html`<urbi-estado-vazio
+                icone="fa-solid fa-map"
+                mensagem=${e.mensagem}
+                submensagem=${e.podeAfirmarVazio && this.parcelamentos.length > 0 ? 'Ajuste a busca ou troque o setor.' : e.submensagem}
+              ></urbi-estado-vazio>`;
+            })()
           : html`
             <urbi-grid min="260px" gap="12px">
               ${filtrados.map((p) => {
@@ -2141,7 +2177,7 @@ export class AppReg360 extends LitElement {
         ? html`<div class="barra-acoes">
             <urbi-botao variante="fantasma" pequeno ?desabilitado=${this.paginaLotesGlobais <= 1}
               @click=${() => void this._carregarLotesGlobais(this.paginaLotesGlobais - 1)}>Anterior</urbi-botao>
-            <span class="prop-meta">Página ${this.paginaLotesGlobais} de ${paginas} · ${this.totalLotesGlobais} lotes${this.leituraLotesGlobais === 'falhou' ? ' (números da leitura anterior)' : ''}</span>
+            <span class="prop-meta">Página ${this.paginaLotesGlobais} de ${paginas} · ${this.totalLotesGlobais} lotes${sufixoNumerosAntigos(this.leituraLotesGlobais)}</span>
             <urbi-botao variante="fantasma" pequeno ?desabilitado=${this.paginaLotesGlobais >= paginas}
               @click=${() => void this._carregarLotesGlobais(this.paginaLotesGlobais + 1)}>Próxima</urbi-botao>
           </div>`
@@ -2334,7 +2370,7 @@ export class AppReg360 extends LitElement {
       <urbi-tabela
         clicavel
         ?carregando=${this.carregando && this.lotes.length === 0}
-        mensagemVazio=${estadoDaLista(estadoDaContagem({ correndo: this.carregando, falhou: this.cargaFalhou }), {
+        mensagemVazio=${estadoDaLista(this.leituraLotesDoParcelamento, {
           vazio: this.lotes.length === 0
             ? 'Nenhum lote neste parcelamento'
             // No modo morador o filtro roda sobre `pessoasPorLote`, e lote que
@@ -2439,11 +2475,15 @@ export class AppReg360 extends LitElement {
           // Badge ausente afirma, em silêncio, que não há transação neste
           // imóvel. Com a leitura falhada isso é afirmação sobre o que não foi
           // lido — o mesmo defeito que `tiposDesconhecidos` cobriu no PR #84,
-          // por outro caminho.
-          if (transacaoDisponivel() && this.leituraTransacoes === 'falhou') {
-            return html`<urbi-badge cor="erro">Transações não lidas</urbi-badge>`;
-          }
-          const b = badgeTransacao(this.transacoes);
+          // por outro caminho. A prioridade do aviso sobre o badge normal mora
+          // em `badgeOuAvisoDeFalha` — não neste `if` — porque reordenar um
+          // `if` escrito à mão perde essa prioridade sem quebrar teste nenhum.
+          const b = badgeOuAvisoDeFalha(
+            transacaoDisponivel(),
+            this.leituraTransacoes,
+            badgeTransacao(this.transacoes),
+            { cor: 'erro', rotulo: 'Transações não lidas' },
+          );
           return b ? html`<urbi-badge cor=${b.cor}>${b.rotulo}</urbi-badge>` : nothing;
         })()}
         ${(() => {
@@ -2535,8 +2575,12 @@ export class AppReg360 extends LitElement {
       <urbi-abas
         .abas=${[
           { id: 'propostas', label: 'Propostas Vigentes' },
-          // O dot marca "tem coisa a ver aqui": integração desligada, ou
-          // leitura que falhou. `transacaoDisponivel()` no primeiro render
+          // O dot marca "tem coisa a ver aqui": integração desligada, leitura
+          // que falhou, OU leitura ainda correndo — este último é de propósito
+          // e não folga: sem ele, o dot ficaria apagado (dizendo "nada a ver")
+          // durante toda a janela entre abrir a aba e `_carregarTransacoes`
+          // responder, inclusive antes de `garantirEstado()` resolver se a
+          // integração está ligada. `transacaoDisponivel()` no primeiro render
           // ainda é a constante compilada — o valor do servidor chega com
           // `garantirEstado()`, e até lá o dot podia dizer o contrário do real.
           { id: 'transacoes', label: 'Transações',
@@ -2664,7 +2708,7 @@ export class AppReg360 extends LitElement {
         ? html`<div class="barra-acoes">
             <urbi-botao variante="fantasma" pequeno ?desabilitado=${this.moradoresPagina <= 1}
               @click=${() => this._carregarMoradores(this.moradoresPagina - 1)}>Anterior</urbi-botao>
-            <span class="prop-meta">Página ${this.moradoresPagina} de ${this.moradoresPaginas}${this.leituraMoradores === 'falhou' ? ' (números da leitura anterior)' : ''}</span>
+            <span class="prop-meta">Página ${this.moradoresPagina} de ${this.moradoresPaginas}${sufixoNumerosAntigos(this.leituraMoradores)}</span>
             <urbi-botao variante="fantasma" pequeno ?desabilitado=${this.moradoresPagina >= this.moradoresPaginas}
               @click=${() => this._carregarMoradores(this.moradoresPagina + 1)}>Próxima</urbi-botao>
           </div>`
@@ -3261,10 +3305,11 @@ export class AppReg360 extends LitElement {
           <urbi-kpi rotulo=${l.rotulo}
             .valor=${l.data
               ? soData(l.data)
-              // `—` aqui afirma "não assinou". Enquanto a leitura não concluiu,
-              // o que ele afirma é "não sei" — e a distinção é a mesma de
-              // `comum/referencias.ts`.
-              : (!transacaoDisponivel() || this.leituraTransacoes === 'concluida') ? '—' : '…'}
+              // Indisponível conta como "leitura concluída, e o resultado é
+              // nada" — não há segunda-fonte que ainda possa responder. A
+              // distinção `…`/`—` em si mora em `comum/estado-lista.ts`,
+              // que cita `comum/referencias.ts` como o mesmo precedente.
+              : TEXTO_AUSENCIA[!transacaoDisponivel() ? 'concluida' : this.leituraTransacoes]}
             formato="texto"></urbi-kpi>`)}
       </urbi-wrap>
       ${this.transacoes.length === 0

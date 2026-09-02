@@ -67,3 +67,54 @@ export function estadoDaLista(estado: EstadoContagem, frases: FrasesDaLista): Es
 export function numeroLido(estado: EstadoContagem, quantidade: number): number | null {
   return estado === 'concluida' ? quantidade : null;
 }
+
+/**
+ * O símbolo de um valor solto (não uma lista) que só pode afirmar "não tem"
+ * depois da leitura concluir. Mesma distinção de `comum/referencias.ts`
+ * (`TEXTO_REFERENCIA`), aplicada a um campo sem id de referência — como as
+ * datas de assinatura de Transação: `—` enquanto a leitura correu ou falhou
+ * diria "não assinou" quando na verdade é "não sei ainda".
+ */
+export const TEXTO_AUSENCIA: Record<EstadoContagem, string> = {
+  correndo: '…',
+  falhou: '…',
+  concluida: '—',
+};
+
+/** Sufixo que denuncia números de uma paginação como sendo de leitura anterior. */
+const SUFIXO_NUMEROS_ANTIGOS = ' (números da leitura anterior)';
+
+/**
+ * Sufixo de rodapé de paginação, para quando a página atual falhou mas o
+ * total exibido é de uma leitura anterior — a paginação continua no ar em vez
+ * de sumir, e o sufixo é o que impede o número de parecer atual.
+ *
+ * Estava duplicado cru em duas telas (lotes globais e moradores) antes deste
+ * módulo: cada cópia lia seu próprio estado, sem checagem cruzada entre elas.
+ */
+export function sufixoNumerosAntigos(estado: EstadoContagem): string {
+  return estado === 'falhou' ? SUFIXO_NUMEROS_ANTIGOS : '';
+}
+
+/** O que um badge de lista mostra: cor e rótulo, ou nenhum badge. */
+export type BadgeOuNulo = { cor: string; rotulo: string } | null;
+
+/**
+ * Decide entre o badge normal (derivado da lista) e um aviso de leitura
+ * falhada — com a prioridade FIXA na função, não no `if` de quem chama.
+ *
+ * Badge ausente afirma, em silêncio, que a lista não tem nada que renderize
+ * badge. Com a leitura falhada isso é afirmação sobre o que não foi lido — daí
+ * o aviso ter que vencer o badge normal (que tende a estar `null`, porque a
+ * lista falhada está vazia) sempre que a leitura falhou e o recurso está
+ * disponível. Reordenar um `if` escrito à mão perderia essa prioridade calado;
+ * aqui não há `if` para reordenar.
+ */
+export function badgeOuAvisoDeFalha(
+  disponivel: boolean,
+  estado: EstadoContagem,
+  badgeNormal: BadgeOuNulo,
+  avisoDeFalha: BadgeOuNulo,
+): BadgeOuNulo {
+  return disponivel && estado === 'falhou' ? avisoDeFalha : badgeNormal;
+}
