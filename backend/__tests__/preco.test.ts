@@ -6,7 +6,11 @@ import {
   valorDoImovel,
   aplicarDescontos,
   respeitaPiso,
+  controlesDePreco,
+  TEXTO_LEITURA_PRECO,
+  TEXTO_LEITURA_CASCATA,
 } from '../../comum/preco.js';
+import type { LeiturasDoPreco } from '../../comum/preco.js';
 
 describe('precoAplicavel — precedência e origem', () => {
   test('estático vence manual e proposta — é o contrato firmado', () => {
@@ -145,5 +149,86 @@ describe('respeitaPiso — informativo, nunca bloqueio', () => {
 
   test('proposta sem piso declarado não sinaliza nada', () => {
     assert.deepEqual(respeitaPiso(10, {}, 'residencial'), { piso: null, abaixoDoPiso: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// controlesDePreco — o que a tela pode afirmar e oferecer
+// ---------------------------------------------------------------------------
+
+describe('controlesDePreco — leitura que não concluiu não vira afirmação nem botão', () => {
+  const ADMIN = { podeCriar: true, ehAdmin: true };
+  const CRIADOR = { podeCriar: true, ehAdmin: false };
+  const LIDO: LeiturasDoPreco = { dados: 'concluida', contexto: 'concluida' };
+
+  // O defeito real: `dadosDoImovel` começa `{}` e assim fica se a requisição
+  // falhar. `preco_estatico == null` é verdadeiro pelo motivo errado, a tela
+  // oferece "Gravar preço de contrato", e o backend devolve 409
+  // REG360_PRECO_ESTATICO_GRAVADO porque o contrato existe.
+  test('não oferece "gravar contrato" antes de ler — o botão tomaria 409', () => {
+    for (const dados of ['correndo', 'falhou'] as const) {
+      const c = controlesDePreco({ dados, contexto: 'concluida' }, {}, ADMIN);
+      assert.equal(c.gravarContrato, false, `estado ${dados}`);
+      assert.equal(c.definirManual, false, `estado ${dados}`);
+      assert.equal(c.corrigirContrato, false, `estado ${dados}`);
+      assert.equal(c.limparManual, false, `estado ${dados}`);
+    }
+  });
+
+  test('lido e sem contrato: aí sim oferece gravar', () => {
+    const c = controlesDePreco(LIDO, {}, CRIADOR);
+    assert.equal(c.gravarContrato, true);
+    assert.equal(c.corrigirContrato, false);
+  });
+
+  test('com contrato gravado, gravar dá lugar a corrigir — e corrigir é só do admin', () => {
+    const comContrato = { preco_estatico: 200 };
+    assert.equal(controlesDePreco(LIDO, comContrato, ADMIN).corrigirContrato, true);
+    assert.equal(controlesDePreco(LIDO, comContrato, CRIADOR).corrigirContrato, false);
+    assert.equal(controlesDePreco(LIDO, comContrato, ADMIN).gravarContrato, false);
+  });
+
+  test('contrato de R$ 0,00 é contrato — zero não é ausência', () => {
+    const c = controlesDePreco(LIDO, { preco_estatico: 0 }, ADMIN);
+    assert.equal(c.gravarContrato, false);
+    assert.equal(c.corrigirContrato, true);
+  });
+
+  test('"limpar manual" só com manual gravado', () => {
+    assert.equal(controlesDePreco(LIDO, { preco_m2_manual: 10 }, CRIADOR).limparManual, true);
+    assert.equal(controlesDePreco(LIDO, {}, CRIADOR).limparManual, false);
+  });
+
+  test('sem podeCriar não há botão nenhum, mesmo com tudo lido', () => {
+    const c = controlesDePreco(LIDO, { preco_m2_manual: 10 }, { podeCriar: false, ehAdmin: true });
+    assert.equal(c.gravarContrato, false);
+    assert.equal(c.definirManual, false);
+    assert.equal(c.limparManual, false);
+    assert.equal(c.corrigirContrato, false);
+  });
+
+  // "Não há contrato, preço manual, nem proposta vigente na cascata" é
+  // afirmação sobre TRÊS fontes. A terceira depende do contexto: sem o
+  // parcelamento resolvido, `resolverVigente` pula os elos de cima.
+  test('não afirma "sem preço" enquanto uma das duas leituras não concluiu', () => {
+    assert.equal(controlesDePreco({ dados: 'falhou', contexto: 'concluida' }, {}, ADMIN).podeAfirmarSemPreco, false);
+    assert.equal(controlesDePreco({ dados: 'concluida', contexto: 'falhou' }, {}, ADMIN).podeAfirmarSemPreco, false);
+    assert.equal(controlesDePreco({ dados: 'correndo', contexto: 'correndo' }, {}, ADMIN).podeAfirmarSemPreco, false);
+    assert.equal(controlesDePreco(LIDO, {}, ADMIN).podeAfirmarSemPreco, true);
+  });
+
+  test('cada leitura pendente rende um aviso, e as duas concluídas não rendem nenhum', () => {
+    assert.equal(controlesDePreco(LIDO, {}, ADMIN).avisos.length, 0);
+    assert.equal(controlesDePreco({ dados: 'falhou', contexto: 'concluida' }, {}, ADMIN).avisos.length, 1);
+    assert.equal(controlesDePreco({ dados: 'falhou', contexto: 'falhou' }, {}, ADMIN).avisos.length, 2);
+  });
+
+  // Sem isto, "carregando" e "falhou" poderiam convergir para a mesma frase, e
+  // a distinção que esta função existe para criar sumiria no texto.
+  test('os textos das duas leituras distinguem correndo de falhou', () => {
+    assert.notEqual(TEXTO_LEITURA_PRECO.correndo, TEXTO_LEITURA_PRECO.falhou);
+    assert.notEqual(TEXTO_LEITURA_CASCATA.correndo, TEXTO_LEITURA_CASCATA.falhou);
+    assert.equal(TEXTO_LEITURA_PRECO.concluida, null);
+    assert.equal(TEXTO_LEITURA_CASCATA.concluida, null);
   });
 });

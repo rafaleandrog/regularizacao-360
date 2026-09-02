@@ -117,6 +117,8 @@ Depois da primeira varredura, o cache serve o resto da sessão: voltar para a ho
 
 `erro` e `cargaFalhou` são coisas diferentes de propósito: o primeiro alimenta o banner, o segundo impede a tela de **afirmar** sobre uma base que ela não leu. Um banner acima não desfaz uma frase abaixo.
 
+**A troca de rota zera o alvo antes de carregar o novo.** `this.rota` muda e só depois a carga corre; sem o reset síncrono no topo de `_carregar()`, a janela entre o clique e a resposta renderiza o cabeçalho, os KPIs, o preço e as propostas do **objeto anterior**, sob o nome do novo. É a única classe de defeito desta família que não exibe ausência — exibe **o dado de outra coisa**, com a mesma confiança. São zerados: `detalhe`, `propostas`, `vigente`, `dadosDoImovel`, `paiDoImovel`, `unidadesDoLote` e os três estados de leitura do imóvel.
+
 ## Quando a flag está desligada
 
 Os dois `403` do gate têm causas opostas e remédios diferentes:

@@ -14,6 +14,8 @@
  * Puro: sem Express, sem Lit, sem fetch.
  */
 
+import type { EstadoContagem } from './agregados.js';
+
 export type OrigemPreco = 'estatico' | 'manual' | 'proposta' | null;
 
 export interface PrecoAplicavel {
@@ -145,4 +147,91 @@ export function respeitaPiso(
   const piso = numero(proposta?.[campo]);
   if (piso === null) return { piso: null, abaixoDoPiso: false };
   return { piso, abaixoDoPiso: preco < piso };
+}
+
+// ---------------------------------------------------------------------------
+// O que a tela pode afirmar e oferecer sobre o preço
+// ---------------------------------------------------------------------------
+
+/**
+ * Duas leituras alimentam o painel de preços, e as duas podem não ter
+ * acontecido:
+ *
+ * - **`dados`** — `imovel_dados` (contrato e preço manual). Enquanto não
+ *   chega, o objeto é `{}`, e `preco_estatico == null` é verdadeiro pelo
+ *   motivo errado.
+ * - **`contexto`** — o parcelamento e o lote da unidade, que são os elos da
+ *   cascata. Sem eles, `resolverVigente` é chamado com `parcelamento_id` e
+ *   `setor_id` `undefined`, **pula os elos de cima** e devolve um preço menor
+ *   (ou nenhum) — que a tela então apresenta como o preço vigente.
+ */
+export interface LeiturasDoPreco {
+  dados: EstadoContagem;
+  contexto: EstadoContagem;
+}
+
+export interface ControlesDePreco {
+  /**
+   * A tela pode escrever *"Sem preço definido: não há contrato, preço manual,
+   * nem proposta vigente na cascata"*? É afirmação sobre **três** fontes, e
+   * exige que as duas leituras tenham concluído.
+   */
+  podeAfirmarSemPreco: boolean;
+  gravarContrato: boolean;
+  corrigirContrato: boolean;
+  definirManual: boolean;
+  limparManual: boolean;
+  /** Uma frase por leitura que não concluiu. Vazio quando as duas concluíram. */
+  avisos: string[];
+}
+
+/**
+ * Os textos das leituras que faltaram. Ficam aqui, e não na tela, porque a
+ * frase é a única saída visível de uma falha que de resto é invisível.
+ */
+export const TEXTO_LEITURA_PRECO: Record<EstadoContagem, string | null> = {
+  correndo: 'Carregando os preços deste imóvel…',
+  falhou: 'Os preços gravados deste imóvel não foram lidos — o que aparece abaixo pode não ser o que está registrado.',
+  concluida: null,
+};
+
+export const TEXTO_LEITURA_CASCATA: Record<EstadoContagem, string | null> = {
+  correndo: 'Resolvendo a cadeia de herança…',
+  falhou: 'A cadeia de herança não foi resolvida: a proposta vigente pode vir de um elo mais baixo que o real.',
+  concluida: null,
+};
+
+/**
+ * O que a tela pode afirmar e quais controles pode oferecer.
+ *
+ * **Nenhum botão de escrita antes de a leitura concluir**, e não por
+ * cautela genérica: com `dados` em `{}`, `preco_estatico == null` é
+ * verdadeiro, a tela oferece *"Gravar preço de contrato"*, e o backend
+ * responde **409 `REG360_PRECO_ESTATICO_GRAVADO`** porque o contrato existe.
+ * Botão que a API vai recusar não entra — a regra é do `CLAUDE.md`, e aqui
+ * ela dependia de um estado que ninguém tinha conferido.
+ */
+export function controlesDePreco(
+  leituras: LeiturasDoPreco,
+  imovelDados: any,
+  perm: { podeCriar: boolean; ehAdmin: boolean },
+): ControlesDePreco {
+  const avisos = [
+    TEXTO_LEITURA_PRECO[leituras.dados],
+    TEXTO_LEITURA_CASCATA[leituras.contexto],
+  ].filter((t): t is string => t !== null);
+
+  const dadosLidos = leituras.dados === 'concluida';
+  const podeCriar = Boolean(perm?.podeCriar) && dadosLidos;
+  const temContrato = numero(imovelDados?.preco_estatico) !== null;
+  const temManual = numero(imovelDados?.preco_m2_manual) !== null;
+
+  return {
+    podeAfirmarSemPreco: dadosLidos && leituras.contexto === 'concluida',
+    gravarContrato: podeCriar && !temContrato,
+    corrigirContrato: podeCriar && temContrato && Boolean(perm?.ehAdmin),
+    definirManual: podeCriar,
+    limparManual: podeCriar && temManual,
+    avisos,
+  };
 }

@@ -6,10 +6,13 @@ import { falhaDeFlag, invalidar as invalidarNucleo, type FalhaDeFlag } from './n
 import { filtrarPorTexto, normalizarTexto } from '../comum/busca.js';
 import { rotuloReferencia } from '../comum/referencias.js';
 import { mapaComLimite } from '../comum/concorrencia.js';
-import { precoAplicavel, valorDoImovel, aplicarDescontos, type FormaPagamento } from '../comum/preco.js';
+import {
+  precoAplicavel, valorDoImovel, aplicarDescontos, type FormaPagamento,
+  controlesDePreco,
+} from '../comum/preco.js';
 import {
   agregarImoveis, somarAgregados, indexarPropostas, chaveImovel, type Agregado,
-  estadoDaContagem, TEXTO_CONTAGEM, TEXTO_CARGA,
+  estadoDaContagem, TEXTO_CONTAGEM, TEXTO_CARGA, type EstadoContagem,
 } from '../comum/agregados.js';
 import { badgeStatusParcelamento } from '../comum/status-parcelamento.js';
 import {
@@ -17,7 +20,9 @@ import {
   FASES, SITUACOES_REGISTRAIS,
 } from '../comum/regularizacao.js';
 import { soData, hoje, statusVigencia, type StatusVigencia } from '../comum/cascata.js';
-import { lerQuitacao } from '../comum/quitacao.js';
+import {
+  lerQuitacao, estadoDaQuitacao, TEXTO_QUITACAO, podeAlternarQuitacao,
+} from '../comum/quitacao.js';
 import { ABAS_TOPO } from '../comum/navegacao.js';
 import { paiDaUnidade, avisoDeHeranca } from '../comum/unidade-cadeia.js';
 import {
@@ -249,6 +254,21 @@ export class AppReg360 extends LitElement {
   @state() private regularizacaoLida = false;
   /** Dados do imóvel aberto: preços de contrato e manual. */
   @state() private dadosDoImovel: any = {};
+  /**
+   * Estado das leituras do imóvel aberto — três estados, não a ausência de um.
+   *
+   * `dadosDoImovel` é `{}` enquanto a carga corre E depois de ela falhar, e
+   * todo consumidor lê esse `{}` como resposta: "não quitado", "sem preço de
+   * contrato", e o botão de gravar contrato que o backend recusa com 409.
+   * `paiDoImovel` vazio é pior, porque não some da tela — ele muda a cascata
+   * de preço e a tela apresenta o resultado como fato.
+   */
+  @state() private leituraDadosDoImovel: EstadoContagem = 'correndo';
+  @state() private leituraContextoDoImovel: EstadoContagem = 'correndo';
+  /** Idem para as propostas do alvo aberto. Sem isto, a lista do alvo ANTERIOR sobrevive. */
+  @state() private leituraPropostas: EstadoContagem = 'correndo';
+  /** Idem para o cache de matrículas, que é por sessão e não por imóvel. */
+  @state() private leituraMatriculas: EstadoContagem = 'correndo';
   /** Modal de preço: qual campo, valor e se é correção de contrato. */
   @state() private formPreco: { campo: 'estatico' | 'manual' | 'corrigir'; valor: string } | null = null;
   @state() private formRegAberto = false;
@@ -426,6 +446,22 @@ export class AppReg360 extends LitElement {
     // Sem o reset, a contagem lida no setor anterior sobreviveria a uma carga
     // que falha, e a tela afirmaria sobre uma base que ela não leu.
     this.totalParcelamentosInstancia = null;
+    // O alvo mudou, e `detalhe`, `propostas` e o contexto do imóvel ainda são
+    // do ANTERIOR. Sem zerar aqui — sincronamente, antes do primeiro `await` —
+    // a janela entre o clique e a resposta renderiza o cabeçalho, os KPIs e a
+    // lista de propostas de um objeto que já saiu da tela; e no caminho de
+    // falha eles ficam lá para sempre, sob o nome do objeto novo.
+    this.detalhe = null;
+    this.propostas = [];
+    this.vigente = null;
+    this.dadosDoImovel = {};
+    this.paiDoImovel = {};
+    this.unidadesDoLote = [];
+    this.avisoHerancaUnidade = null;
+    this.loteDaUnidade = null;
+    this.leituraPropostas = 'correndo';
+    this.leituraDadosDoImovel = 'correndo';
+    this.leituraContextoDoImovel = 'correndo';
     this.carregando = true;
     try {
       switch (this.rota.view) {
@@ -600,12 +636,18 @@ export class AppReg360 extends LitElement {
    * por lote. A varredura ganha, e o cache a paga uma vez por sessão.
    */
   private async _carregarMatriculas() {
-    if (this.matriculasPorId.size > 0) return;
+    // O cache é por SESSÃO, não por imóvel: uma vez lido, continua lido.
+    if (this.matriculasPorId.size > 0) { this.leituraMatriculas = 'concluida'; return; }
+    this.leituraMatriculas = 'correndo';
     try {
       const mats = await reg360Api.matriculas();
       this.matriculasPorId = new Map(mats.map((m: any) => [Number(m.id), m]));
+      this.leituraMatriculas = 'concluida';
     } catch (e: any) {
-      // Degrada a coluna Matrícula, não a tela.
+      // Degrada a coluna Matrícula, não a tela. A marca de falha existe porque
+      // `rotuloReferencia` sozinho devolve `…` — e `…` eterno, sem nada que
+      // diga o motivo, é limbo: o usuário não sabe se espera ou se recarrega.
+      this.leituraMatriculas = 'falhou';
       this._registrarFalha(e, 'Falha ao carregar matrículas');
     }
   }
@@ -619,6 +661,7 @@ export class AppReg360 extends LitElement {
   private async _carregarContextoDoImovel() {
     const d = this.detalhe;
     if (!d) return;
+    this.leituraContextoDoImovel = 'correndo';
     this.paiDoImovel = {};
     this.unidadesDoLote = [];
     this.avisoHerancaUnidade = null;
@@ -652,8 +695,13 @@ export class AppReg360 extends LitElement {
           };
         }
       }
+      this.leituraContextoDoImovel = 'concluida';
     } catch (e: any) {
-      // Contexto ausente degrada rótulo, não a tela.
+      // Contexto ausente NÃO degrada só rótulo: `paiDoImovel` vazio faz
+      // `resolverVigente` ser chamado sem `parcelamento_id` e sem `setor_id`,
+      // a cascata pula os elos de cima, e a tela apresenta um preço menor (ou
+      // nenhum) como se fosse o vigente. A marca é o que permite dizer isso.
+      this.leituraContextoDoImovel = 'falhou';
       this._registrarFalha(e, 'Falha ao carregar o contexto do imóvel');
     }
   }
@@ -740,9 +788,15 @@ export class AppReg360 extends LitElement {
   private async _carregarDadosDoImovel() {
     this.dadosDoImovel = {};
     if (!this.rota.id) return;
+    this.leituraDadosDoImovel = 'correndo';
     try {
       this.dadosDoImovel = await reg360Api.imovelDados(this.rota.view, this.rota.id) || {};
+      this.leituraDadosDoImovel = 'concluida';
     } catch (e: any) {
+      // `{}` é a resposta legítima de imóvel nunca editado — a maioria. Por
+      // isso a falha precisa de marca própria: sem ela, o badge "Quitado" some
+      // de um imóvel quitado e a tela oferece gravar um contrato que existe.
+      this.leituraDadosDoImovel = 'falhou';
       this._registrarFalha(e, 'Falha ao carregar preços do imóvel');
     }
   }
@@ -1244,6 +1298,14 @@ export class AppReg360 extends LitElement {
   }
 
   /**
+   * O mesmo, com a leitura embutida: "não perguntei" e "perguntei e falhou"
+   * deixam de cair no mesmo `false` de "não quitado".
+   */
+  private get _estadoQuitacao() {
+    return estadoDaQuitacao(this.leituraDadosDoImovel, this.dadosDoImovel);
+  }
+
+  /**
    * Botão de quitação. Só quem aprova proposta vê — quitação é constatação
    * financeira, não cadastro, e `criador` tomaria 403 se clicasse.
    *
@@ -1252,6 +1314,12 @@ export class AppReg360 extends LitElement {
    * autoria.
    */
   private _renderBotaoQuitacao(): TemplateResult {
+    const estado = this._estadoQuitacao;
+    // Sem a leitura, o botão seria escolhido pelo estado errado: "Marcar como
+    // quitado" para um imóvel que já está. A frase diz por que ele não está aí.
+    if (!podeAlternarQuitacao(estado)) {
+      return html`<p class="prop-meta">${TEXTO_QUITACAO[estado]}</p>`;
+    }
     const q = this._quitacao;
     const tipo = this.rota.view;
     const id = Number(this.rota.id);
@@ -1277,10 +1345,27 @@ export class AppReg360 extends LitElement {
     return precoAplicavel(this.dadosDoImovel, this.vigente?.vigente);
   }
 
-  private async _acaoPreco(fn: () => Promise<any>, sucesso: string) {
+  /**
+   * Ação sobre o imóvel aberto, com recarga do que ela afeta.
+   *
+   * `atualizaDados` diz se a resposta de `fn` **é** o registro de
+   * `imovel_dados`. Antes isso era assumido de todo chamador, e o de
+   * desvincular morador não cumpre: a rota devolve `{ removido: true,
+   * lote_id, vinculo_id }`, que não tem `quitado` nem `preco_estatico`.
+   * Desvincular um morador, portanto, fazia o badge "Quitado" sumir de um
+   * imóvel quitado e a tela voltar a oferecer "Gravar preço de contrato" —
+   * que o backend recusa com 409. Não era falta de leitura: era a resposta
+   * errada guardada no lugar da leitura.
+   */
+  private async _acaoPreco(
+    fn: () => Promise<any>,
+    sucesso: string,
+    opcoes: { atualizaDados?: boolean } = {},
+  ) {
     try {
       this.carregando = true;
-      this.dadosDoImovel = await fn();
+      const resposta = await fn();
+      if (opcoes.atualizaDados !== false) this.dadosDoImovel = resposta ?? {};
       // O preço deste imóvel entra no VGV do parcelamento e do setor.
       await this._recarregarBasesDoVgv();
       urbiVerso.notificar?.(sucesso, 'sucesso');
@@ -1509,7 +1594,17 @@ export class AppReg360 extends LitElement {
   }
 
   private async _carregarPropostas(nivel: string, refId: number) {
-    this.propostas = (await reg360Api.listarPropostas({ nivel, ref_id: refId })).dados || [];
+    this.leituraPropostas = 'correndo';
+    try {
+      this.propostas = (await reg360Api.listarPropostas({ nivel, ref_id: refId })).dados || [];
+      this.leituraPropostas = 'concluida';
+    } catch (e: any) {
+      // Antes isto subia para o `catch` do `_carregar`, que marca `cargaFalhou`
+      // e interrompe o resto da carga do imóvel. Aqui a falha é da lista, fica
+      // na lista, e para de virar "Nenhuma proposta neste nível".
+      this.leituraPropostas = 'falhou';
+      this._registrarFalha(e, 'Falha ao carregar as propostas');
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -2166,6 +2261,14 @@ export class AppReg360 extends LitElement {
         @urbi:tabela-click=${(e: CustomEvent) => this._navegar(`/lote/${e.detail.linha.id}`)}
       ></urbi-tabela>
 
+      ${this.leituraMatriculas === 'falhou'
+        ? html`<p class="prop-meta">
+            A lista de matrículas não carregou — a coluna Matrícula mostra <strong>…</strong>
+            (não resolvida), que não é o mesmo que <strong>—</strong> (não tem).
+            <urbi-botao variante="fantasma" pequeno @click=${() => void this._carregarMatriculas()}>Tentar de novo</urbi-botao>
+          </p>`
+        : nothing}
+
       ${this.lotesComFalhaDePessoas.size > 0
         ? html`<p class="prop-meta">
             ${this.lotesComFalhaDePessoas.size}
@@ -2226,9 +2329,17 @@ export class AppReg360 extends LitElement {
           const b = badgeTransacao(this.transacoes);
           return b ? html`<urbi-badge cor=${b.cor}>${b.rotulo}</urbi-badge>` : nothing;
         })()}
-        ${this._quitacao.quitado
-          ? html`<urbi-badge cor="sucesso">Quitado${this._quitacao.em ? ` em ${soData(this._quitacao.em)}` : ''}${this._quitacao.porNome ? ` · ${this._quitacao.porNome}` : ''}</urbi-badge>`
-          : nothing}
+        ${(() => {
+          // Badge ausente é afirmação silenciosa de que o imóvel não está
+          // quitado. Nos dois estados não apurados ela não pode ser feita, e o
+          // que entra no lugar é a frase — não o silêncio.
+          const eq = this._estadoQuitacao;
+          if (eq === 'quitado') {
+            return html`<urbi-badge cor="sucesso">Quitado${this._quitacao.em ? ` em ${soData(this._quitacao.em)}` : ''}${this._quitacao.porNome ? ` · ${this._quitacao.porNome}` : ''}</urbi-badge>`;
+          }
+          const texto = TEXTO_QUITACAO[eq];
+          return texto ? html`<urbi-badge cor="padrao">${texto}</urbi-badge>` : nothing;
+        })()}
       </urbi-wrap>
       ${this.avisoHerancaUnidade
         ? html`<urbi-banner variante="aviso">${this.avisoHerancaUnidade}</urbi-banner>`
@@ -2244,6 +2355,9 @@ export class AppReg360 extends LitElement {
                     void this._acaoPreco(
                       () => reg360Api.desvincularMorador(Number(u.id), Number(v.vinculo_id)),
                       'Morador desvinculado',
+                      // Desvincular não mexe em `imovel_dados`, e a resposta
+                      // dela não é esse registro.
+                      { atualizaDados: false },
                     ).then(() => { this.pessoasPorLote = new Map(); return this._carregarPessoasDaPagina([u]); });
                   }}>Desvincular</urbi-botao>`
               : nothing}`)}</urbi-wrap>`
@@ -2265,6 +2379,12 @@ export class AppReg360 extends LitElement {
         <urbi-kpi rotulo="Área (m²)" .valor=${fmtArea(u.area_efetiva ?? u.area)} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Matrícula" .valor=${rotuloReferencia(mat ? nomeDe(mat) : null, u.matricula_id)} formato="texto"></urbi-kpi>
       </urbi-wrap>
+      ${this.leituraMatriculas === 'falhou' && u.matricula_id
+        ? html`<p class="prop-meta">
+            A lista de matrículas não carregou — o <strong>…</strong> acima é isso, não ausência de matrícula.
+            <urbi-botao variante="fantasma" pequeno @click=${() => void this._carregarMatriculas()}>Tentar de novo</urbi-botao>
+          </p>`
+        : nothing}
       ${this.unidadesDoLote.length > 0
         ? html`
             <p class="secao-titulo">Unidades desta incorporação</p>
@@ -2676,7 +2796,14 @@ export class AppReg360 extends LitElement {
           </urbi-banner>`
         : nothing}
       ${this.propostas.length === 0
-        ? html`<urbi-estado-vazio icone="fa-solid fa-file-invoice-dollar" mensagem="Nenhuma proposta neste nível"></urbi-estado-vazio>`
+        // "Nenhuma proposta neste nível" é afirmação sobre a cascata inteira.
+        // Ela só vale depois de a lista ter sido lida: em voo, ou depois de
+        // uma falha, a lista está vazia pelo motivo errado.
+        ? this.leituraPropostas === 'concluida'
+          ? html`<urbi-estado-vazio icone="fa-solid fa-file-invoice-dollar" mensagem="Nenhuma proposta neste nível"></urbi-estado-vazio>`
+          : html`<urbi-estado-vazio icone="fa-solid fa-file-invoice-dollar"
+              mensagem=${this.leituraPropostas === 'falhou' ? 'Não foi possível carregar as propostas' : 'Carregando as propostas…'}
+              submensagem=${this.leituraPropostas === 'falhou' ? 'O que está gravado não foi lido — pode haver proposta vigente aqui.' : ''}></urbi-estado-vazio>`
         : html`<urbi-stack>
             ${this.propostas.map((p) => html`
               <div class="prop-card">
@@ -3003,20 +3130,35 @@ export class AppReg360 extends LitElement {
     const formas: Array<[FormaPagamento, string]> = [['a_vista', 'À vista'], ['6x', '6×'], ['12x', '12×']];
     const temDesconto = vigente && formas.some(([f]) => aplicarDescontos(preco, vigente, f, area) !== preco);
 
+    // O painel inteiro depende de DUAS leituras que podem não ter acontecido:
+    // `imovel_dados` (contrato e manual) e o contexto (os elos da cascata).
+    // `controlesDePreco` é quem sabe o que pode ser afirmado em cada caso.
+    const ctrl = controlesDePreco(
+      { dados: this.leituraDadosDoImovel, contexto: this.leituraContextoDoImovel },
+      d,
+      { podeCriar: this.podeCriar, ehAdmin: urbiVerso.contexto?.()?.nivelApp === 'admin' },
+    );
+    // `—` num KPI de preço diz "não tem". Enquanto a leitura não concluiu, o
+    // que ele diz é "não sei" — e são coisas diferentes (`comum/referencias.ts`).
+    const naoLido = this.leituraDadosDoImovel !== 'concluida';
+
     return html`
+      ${ctrl.avisos.map((a) => html`<urbi-banner variante="aviso">${a}</urbi-banner>`)}
       <urbi-wrap>
-        <urbi-kpi rotulo="Valor do imóvel" .valor=${valor === null ? '—' : fmtMoeda(valor)} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Valor do imóvel" .valor=${valor === null ? (naoLido ? '…' : '—') : fmtMoeda(valor)} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Preço proposta vigente (R$/m²)"
-          .valor=${vigente ? fmtMoeda(vigente.preco_m2) : '—'} formato="texto"></urbi-kpi>
+          .valor=${vigente ? fmtMoeda(vigente.preco_m2) : (this.leituraContextoDoImovel === 'concluida' ? '—' : '…')} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Preço de contrato (R$/m²)"
-          .valor=${d.preco_estatico != null ? fmtMoeda(d.preco_estatico) : '—'} formato="texto"></urbi-kpi>
+          .valor=${d.preco_estatico != null ? fmtMoeda(d.preco_estatico) : (naoLido ? '…' : '—')} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Preço final (R$/m²)"
-          .valor=${preco === null ? '—' : fmtMoeda(preco)} formato="texto"></urbi-kpi>
+          .valor=${preco === null ? (naoLido ? '…' : '—') : fmtMoeda(preco)} formato="texto"></urbi-kpi>
       </urbi-wrap>
       <p class="prop-meta">
         ${origem
           ? html`Preço final vem de <strong>${ROTULO_ORIGEM[origem]}</strong>.`
-          : html`Sem preço definido: não há contrato, preço manual, nem proposta vigente na cascata.`}
+          : ctrl.podeAfirmarSemPreco
+            ? html`Sem preço definido: não há contrato, preço manual, nem proposta vigente na cascata.`
+            : nothing}
         ${d.preco_estatico != null && d.preco_estatico_em
           ? html` Contrato gravado em ${fmtData(d.preco_estatico_em)}${d.preco_estatico_por_nome ? ` por ${d.preco_estatico_por_nome}` : ''}.`
           : nothing}
@@ -3033,16 +3175,19 @@ export class AppReg360 extends LitElement {
 
       ${this.podeCriar
         ? html`<div class="barra-acoes">
-            ${d.preco_estatico == null
+            ${ctrl.gravarContrato
               ? html`<urbi-botao variante="secundario" pequeno icone="fa-solid fa-file-signature"
                   @click=${() => this._abrirPreco('estatico')}>Gravar preço de contrato</urbi-botao>`
-              : this.podeCriar && urbiVerso.contexto?.()?.nivelApp === 'admin'
-                ? html`<urbi-botao variante="perigo" pequeno icone="fa-solid fa-triangle-exclamation"
-                    @click=${() => this._abrirPreco('corrigir')}>Corrigir preço de contrato</urbi-botao>`
-                : nothing}
-            <urbi-botao variante="fantasma" pequeno icone="fa-solid fa-pen"
-              @click=${() => this._abrirPreco('manual')}>Definir preço manual</urbi-botao>
-            ${d.preco_m2_manual != null
+              : nothing}
+            ${ctrl.corrigirContrato
+              ? html`<urbi-botao variante="perigo" pequeno icone="fa-solid fa-triangle-exclamation"
+                  @click=${() => this._abrirPreco('corrigir')}>Corrigir preço de contrato</urbi-botao>`
+              : nothing}
+            ${ctrl.definirManual
+              ? html`<urbi-botao variante="fantasma" pequeno icone="fa-solid fa-pen"
+                  @click=${() => this._abrirPreco('manual')}>Definir preço manual</urbi-botao>`
+              : nothing}
+            ${ctrl.limparManual
               ? html`<urbi-botao variante="fantasma" pequeno
                   @click=${() => this._acaoPreco(() => reg360Api.salvarPrecoManual(this.rota.view, Number(u.id), null), 'Preço manual removido')}>Limpar manual</urbi-botao>`
               : nothing}

@@ -69,6 +69,15 @@ Aprovação e vigência são **eixos diferentes**, e a tela mostra os dois. Uma 
 
 Quando o imóvel não tem proposta própria vigente, a aba mostra um banner nomeando **de qual nível** o preço veio e qual é o valor. Sem isso, uma lista vazia de propostas ao lado de um preço no topo parece defeito.
 
+### "Nenhuma proposta neste nível" é afirmação sobre a cascata
+
+A lista vazia tem três causas, e duas delas não são "não há proposta": a carga ainda corre, ou ela falhou. O estado vazio distingue as três.
+
+Duas coisas mudaram junto com isso, e as duas eram defeito:
+
+- **`_carregarPropostas` não tinha `try/catch`.** A falha subia para o `catch` da carga da view, que marca `cargaFalhou` e **interrompe o resto** da carga do imóvel. Agora a falha da lista fica na lista.
+- **A lista não era zerada na troca de alvo.** Navegar de um lote para outro mantinha as propostas do anterior na tela, sob o nome do novo — e, no caminho de falha, para sempre. O reset é síncrono, no topo de `_carregar()`, antes do primeiro `await`.
+
 ## Proposta Tabela de Setor (RN-02)
 
 Propostas de `nivel=setor` e `tipo_proposta=tabela` são a base mínima de precificação e **nunca devem ficar sem vigência**. A rotina diária `checar_propostas_vencendo` (framework de Rotinas) verifica as que vencem em até 24h e notifica os `validador_interno` para renovar. Controle de duplicata pela flag `notificacao_vencimento_enviada`.

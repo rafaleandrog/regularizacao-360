@@ -6,6 +6,8 @@
  * quitação — daí autoria e data andarem sempre juntas com a flag.
  */
 
+import type { EstadoContagem } from './agregados.js';
+
 /**
  * Campos que **só** as rotas dedicadas podem escrever.
  *
@@ -61,4 +63,55 @@ export function lerQuitacao(dados: any): Quitacao {
     em: dados?.quitado_em ?? null,
     porNome: dados?.quitado_por_nome ?? null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Quitação × estado da leitura
+// ---------------------------------------------------------------------------
+
+/**
+ * Quitação com o estado da LEITURA embutido — quatro estados, não dois.
+ *
+ * `lerQuitacao` responde a pergunta certa ("o registro diz quitado?") e não
+ * tem como responder a anterior: **houve registro para ler?** Com
+ * `dadosDoImovel` ainda em voo, ou depois de uma requisição que falhou, o
+ * objeto é `{}` — e `Boolean(undefined)` é `false`, indistinguível de um
+ * imóvel que realmente não está quitado.
+ *
+ * O custo disso não é cosmético: o badge "Quitado" **some** de um imóvel
+ * quitado, e o botão oferecido passa a ser "Marcar como quitado" para quem já
+ * está. Mesma família de defeito que `estadoDosOcupantes` e
+ * `estadoDaContagem` cobrem nos seus recortes.
+ */
+export type EstadoQuitacao = 'nao_lida' | 'falhou' | 'quitado' | 'nao_quitado';
+
+export function estadoDaQuitacao(leitura: EstadoContagem, dados: any): EstadoQuitacao {
+  // Falha vence: quem falha deixa `dadosDoImovel` em `{}`, e perguntar só ao
+  // objeto devolveria "não quitado" com a mesma cara de um fato apurado.
+  if (leitura === 'falhou') return 'falhou';
+  if (leitura === 'correndo') return 'nao_lida';
+  return lerQuitacao(dados).quitado ? 'quitado' : 'nao_quitado';
+}
+
+/**
+ * A frase dos estados em que **não há marca a exibir**. `null` nos dois
+ * estados apurados: ali quem fala é o badge (ou o silêncio dele, que aí
+ * significa mesmo "não quitado").
+ */
+export const TEXTO_QUITACAO: Record<EstadoQuitacao, string | null> = {
+  nao_lida: 'Quitação: consultando…',
+  falhou: 'Quitação: não foi possível ler',
+  quitado: null,
+  nao_quitado: null,
+};
+
+/**
+ * O controle de quitar/desquitar pode aparecer?
+ *
+ * Não quando a leitura não concluiu: o botão exibido seria escolhido pelo
+ * estado errado — oferecer "Marcar como quitado" a um imóvel já quitado é
+ * pedir ao usuário que confirme uma coisa que a tela não sabe.
+ */
+export function podeAlternarQuitacao(estado: EstadoQuitacao): boolean {
+  return estado === 'quitado' || estado === 'nao_quitado';
 }
