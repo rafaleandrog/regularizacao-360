@@ -95,7 +95,21 @@ A chave é `(recurso, filtros)` com as chaves ordenadas, e filtro vazio é desca
 
 ## Carregamento progressivo
 
-A home mostra os setores com a contagem de parcelamentos **imediatamente** (são uma página cada: 6 setores, 60 parcelamentos) e dispara a varredura de lotes em segundo plano. Enquanto ela não termina, o rótulo diz `contando lotes…` — nunca `0 lotes`, que seria mentira enquanto a conta ainda corre.
+A home mostra os setores com a contagem de parcelamentos **imediatamente** (são uma página cada: 6 setores, 60 parcelamentos) e dispara a varredura de lotes em segundo plano.
+
+**A contagem tem três estados, não dois** (`estadoDaContagem`, em `comum/agregados.ts`):
+
+| Estado | O rótulo |
+|---|---|
+| `correndo` | `contando lotes…` |
+| `falhou` | `contagem indisponível` |
+| `concluida` | o número |
+
+`0 lotes` é resposta legítima **só depois de uma varredura que terminou bem**. Enquanto ela corre, seria mentira — e **depois de ela falhar, também**: o mapa fica vazio, a flag de "correndo" volta a `false`, e sem o terceiro estado a tela passaria a afirmar zero com a mesma cara com que afirmaria um número apurado.
+
+Esse segundo caso já mordeu: a guarda original olhava só para "está correndo", então cobria a janela do carregamento e não a da falha. O painel de VGV logo abaixo, no mesmo card, já distinguia *"Calculando"* de *"indisponível"* — a contagem tinha ficado para trás.
+
+**A área somada dos lotes herda os mesmos três estados**, porque sai do mesmo mapa. Sem isso, a varredura que falha mostraria `Área dos lotes: 0` ao lado de `contagem indisponível` — dois números da mesma fonte, um dizendo que não sabe e o outro afirmando zero.
 
 Depois da primeira varredura, o cache serve o resto da sessão: voltar para a home não repete as 32 requisições.
 

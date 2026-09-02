@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import {
   agregarImoveis, somarAgregados, indexarPropostas, vigentePorCascata, chaveImovel,
+  estadoDaContagem,
+  TEXTO_CONTAGEM,
 } from '../../comum/agregados.js';
 
 const HOJE = '2026-06-15';
@@ -173,5 +175,35 @@ describe('somarAgregados', () => {
     const y = agregarImoveis([]);
     x.areaPorMatricula.set(1, 10);
     assert.equal(y.areaPorMatricula.size, 0);
+  });
+});
+
+describe('estadoDaContagem — falha não é zero', () => {
+  test('varredura concluída: o número fala', () => {
+    assert.equal(estadoDaContagem({ correndo: false, falhou: false }), 'concluida');
+    assert.equal(TEXTO_CONTAGEM.concluida, null);
+  });
+
+  test('correndo: "0 lotes" seria mentira', () => {
+    assert.equal(estadoDaContagem({ correndo: true, falhou: false }), 'correndo');
+    assert.ok(TEXTO_CONTAGEM.correndo);
+  });
+
+  // O caso que faltava: a guarda original olhava só para "correndo", então
+  // depois da falha `varrendoLotes` volta a false, o mapa fica vazio, e todo
+  // card passava a exibir "0 lotes" com cara de número apurado.
+  test('falhou: o mapa fica vazio e a tela NÃO pode dizer zero', () => {
+    assert.equal(estadoDaContagem({ correndo: false, falhou: true }), 'falhou');
+    assert.ok(TEXTO_CONTAGEM.falhou);
+    assert.notEqual(TEXTO_CONTAGEM.falhou, TEXTO_CONTAGEM.correndo);
+  });
+
+  test('retry em andamento vence a falha anterior — é informação mais nova', () => {
+    assert.equal(estadoDaContagem({ correndo: true, falhou: true }), 'correndo');
+  });
+
+  test('só o estado concluído dispensa texto', () => {
+    const semTexto = Object.values(TEXTO_CONTAGEM).filter((v) => v === null);
+    assert.equal(semTexto.length, 1);
   });
 });

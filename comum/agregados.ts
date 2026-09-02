@@ -222,3 +222,42 @@ export function somarAgregados(partes: Agregado[]): Agregado {
   acc.areaTotal = acc.areaPropria + somaDoMapa(acc.areaPorMatricula);
   return acc;
 }
+
+/**
+ * Os três estados de uma contagem varrida — e por que não são dois.
+ *
+ * A varredura de lotes é assíncrona e pode falhar. Enquanto ela corre, dizer
+ * "0 lotes" é mentira; **e depois de ela falhar, também é** — o mapa fica
+ * vazio, a flag de "correndo" volta a `false`, e a tela passa a afirmar zero
+ * com a mesma cara com que afirmaria um número real.
+ *
+ * Esse segundo caso era o que faltava. A guarda original olhava só para
+ * "está correndo", então cobria a janela do carregamento e não a da falha —
+ * e o painel de VGV logo abaixo, no mesmo card, já distinguia "Calculando"
+ * de "indisponível". A contagem ficou para trás.
+ *
+ * Zero é resposta legítima **só depois de uma varredura que terminou bem**:
+ * aí o parcelamento realmente não tem lote.
+ */
+export type EstadoContagem = 'correndo' | 'falhou' | 'concluida';
+
+export function estadoDaContagem(v: {
+  correndo: boolean;
+  falhou: boolean;
+}): EstadoContagem {
+  // "Correndo" vence "falhou": um retry em andamento depois de uma falha é
+  // informação mais nova que a falha anterior.
+  if (v?.correndo) return 'correndo';
+  if (v?.falhou) return 'falhou';
+  return 'concluida';
+}
+
+/**
+ * O texto dos estados em que **não há número a mostrar**. `null` em
+ * `concluida`: aí quem fala é a contagem.
+ */
+export const TEXTO_CONTAGEM: Record<EstadoContagem, string | null> = {
+  correndo: 'contando lotes…',
+  falhou: 'contagem indisponível',
+  concluida: null,
+};
