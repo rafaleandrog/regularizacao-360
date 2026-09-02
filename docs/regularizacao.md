@@ -8,6 +8,18 @@ tipo:
 
 > O acompanhamento da regularização não cabe no Núcleo, e por isso mora aqui. São **duas classificações independentes**, não uma fila de cinco estados.
 
+## "Irregular" só é dito depois de ler
+
+`faseRegularizacao` deriva a fase das datas do trâmite, e devolve **`irregular`** quando não há registro em `parcelamento_dados`. Isso está certo: parcelamento sem linha lá de fato não começou a regularizar.
+
+**O que não pode é perguntar com o mapa vazio.** A carga de `parcelamento_dados` é disparada em segundo plano (`void this._carregarRegularizacao()`), então há uma janela em toda abertura de tela — e, se a requisição falhar, o mapa fica vazio para sempre. Nos dois casos a tela derivava `irregular` e carimbava **todos os 60 parcelamentos** como irregulares.
+
+"Irregular" não é rótulo neutro: é afirmação sobre a situação jurídica de um empreendimento. Dizê-la em massa porque uma requisição falhou é o erro mais caro desta classe.
+
+Por isso `_faseDe` devolve `null` enquanto `regularizacaoLida` for falso, e o badge vira **`fase não lida`** (`BADGE_FASE_NAO_LIDA`), em cor neutra que não se confunde com nenhuma fase real — há teste garantindo isso.
+
+**O filtro por fase acompanha:** com a carga pendente, ele não corta. Filtrar sobre dado não lido devolveria lista vazia com a mensagem "nenhum parcelamento com esse filtro" — outra afirmação sem base.
+
 ## Por que no app, e não no Núcleo
 
 O Núcleo tem `data_registro`, `area` e `regularizacao` (booleano) no parcelamento, e deriva daí um `status` de três valores: `registrado`, `irregular`, `nao_registrado`. É o fato **registral** — o cartório.

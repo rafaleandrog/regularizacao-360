@@ -261,3 +261,17 @@ export const TEXTO_CONTAGEM: Record<EstadoContagem, string | null> = {
   falhou: 'contagem indisponível',
   concluida: null,
 };
+
+/**
+ * Os mesmos três estados, para contagem que vem da **carga da view** e não da
+ * varredura de lotes.
+ *
+ * Dois mapas de texto e **uma** decisão: o que muda entre os casos é a frase,
+ * não a regra. Duplicar `estadoDaContagem` seria criar dois lugares para o
+ * mesmo julgamento divergirem.
+ */
+export const TEXTO_CARGA: Record<EstadoContagem, string | null> = {
+  correndo: 'carregando…',
+  falhou: 'não foi possível carregar',
+  concluida: null,
+};

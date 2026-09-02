@@ -66,6 +66,8 @@ O polo (`up_contra` / `contra_up`) é dado, não texto: os títulos do legado ca
 
 ## O que **não** virou tabela
 
+**Referência lógica tem três estados na tela, não dois.** Sem FK, um campo que aponta para o Núcleo pode estar *resolvido* (o alvo veio), *não resolvido* (**há id**, o alvo ainda não chegou ou falhou) ou *ausente* (não há id). `—` afirma "não tem" — usá-lo durante a carga diz que o imóvel não tem matrícula quando ele tem uma que a tela ainda não leu, e as cargas que resolvem essas referências rodam em segundo plano. A regra mora em `comum/referencias.ts` (`rotuloReferencia`), e o símbolo do estado intermediário é `…`.
+
 **Transação.** A entidade **existe no Núcleo** (`transacoes`), e é por isso que o app nunca criou uma cópia dela aqui: uma tabela própria teria virado a segunda Transação da UP no dia em que esta chegasse. O que existe é um **adaptador com interruptor**, ainda desligado — ver [transacao-integracao.md](transacao-integracao) e a **#80**.
 
 **Uso e Tipo de Lote.** Vão morar no objeto **Lote do Núcleo**. Criar as colunas em `imovel_dados` agora daria uma segunda fonte da verdade para o mesmo dado, exatamente o que esta página inteira existe para evitar. As issues #19, #20 e #21 precisam ser reescritas nesse sentido.

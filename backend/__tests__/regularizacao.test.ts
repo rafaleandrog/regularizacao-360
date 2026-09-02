@@ -9,6 +9,7 @@ import {
   apenasEditaveisParcelamento,
   FASES,
   SITUACOES_REGISTRAIS,
+  BADGE_FASE_NAO_LIDA,
 } from '../../comum/regularizacao.js';
 
 describe('faseRegularizacao — ordem inversa', () => {
@@ -120,5 +121,28 @@ describe('apenasEditaveisParcelamento', () => {
 
   test('fonte nula não quebra', () => {
     assert.deepEqual(apenasEditaveisParcelamento(null), {});
+  });
+});
+
+describe('BADGE_FASE_NAO_LIDA — "irregular" é afirmação jurídica, não default de tela', () => {
+  // `faseRegularizacao(undefined)` devolver 'irregular' está CERTO: parcelamento
+  // sem linha em parcelamento_dados de fato não começou a regularizar.
+  test('sem registro, a fase é irregular — e isso é derivação legítima', () => {
+    assert.equal(faseRegularizacao(undefined), 'irregular');
+    assert.equal(faseRegularizacao({}), 'irregular');
+  });
+
+  // O que estava errado era QUEM perguntava: a tela chamava com o mapa vazio
+  // durante a carga (em segundo plano) e depois de falha, e todo parcelamento
+  // aparecia como "Irregular".
+  test('o badge de não-lida não se confunde com nenhuma fase real', () => {
+    const reais = FASES.map((f) => f.rotulo);
+    assert.ok(!reais.includes(BADGE_FASE_NAO_LIDA.rotulo));
+    assert.notEqual(BADGE_FASE_NAO_LIDA.rotulo, badgeFase('irregular').rotulo);
+  });
+
+  test('não-lida é neutra: não veste a cor de nenhuma fase', () => {
+    assert.equal(BADGE_FASE_NAO_LIDA.cor, 'padrao');
+    assert.notEqual(BADGE_FASE_NAO_LIDA.cor, badgeFase('irregular').cor);
   });
 });
