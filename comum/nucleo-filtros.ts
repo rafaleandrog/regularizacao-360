@@ -26,9 +26,26 @@
 /**
  * Filtros de igualdade que cada recurso do Núcleo honra.
  *
- * **Conferido em 2026-08-29** contra os objetos `OPCOES_*` de
- * `nucleo/backend/src/rotas/*.ts` no monorepo. É retrato de um instante: se o
- * Núcleo mudar, esta tabela mente até alguém reconferir — daí a data escrita.
+ * **Reconferido em 2026-09-02 contra o `@urbiverso/sdk` 52.0.0 publicado**
+ * (`docs/nucleo.md` § Filtros de igualdade exata), e as quatro entidades de
+ * fábrica batem exatamente com o que está abaixo.
+ *
+ * A conferência anterior (2026-08-29) leu os objetos `OPCOES_*` de
+ * `nucleo/backend/src/rotas/*.ts` **no monorepo** — fonte errada, ainda que os
+ * valores tenham coincidido. O `main` está sempre à frente do que foi cunhado,
+ * então conferir por ali produz uma tabela que descreve um Núcleo que a
+ * instância pode não estar rodando. A referência é o bundle publicado; refaça
+ * a conferência a cada nível novo de SDK, por ali.
+ *
+ * **`pessoas` é o caso que o contrato publicado NÃO responde.** A doc do SDK
+ * lista os filtros de `lotes`, `glebas`, `unidades` e `parcelamentos`; a rota
+ * de pessoas é escrita à mão, fora da fábrica de handlers, e a doc não declara
+ * o `tipo`. Mantemos `['tipo']` aqui porque a tela de Moradores depende dele —
+ * e o que cobre essa incerteza é a SEGUNDA guarda, não esta tabela:
+ * `linhasForaDoFiltro` confere o `tipo` de cada linha que voltou, e o Núcleo
+ * entrega `tipo` no payload como discriminador de supertipo. Se o filtro
+ * passar a ser ignorado, a tela quebra alto com `ErroDeFiltro` em vez de
+ * listar pessoa jurídica em silêncio.
  *
  * Só os recursos que a app lista. Recurso ausente daqui é recusado por
  * `conferirFiltros`, de propósito: acrescentar entidade obriga a olhar a
