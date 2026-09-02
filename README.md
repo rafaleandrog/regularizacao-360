@@ -25,20 +25,22 @@ scripts/         # importador do Planilhão (ferramenta de operação, não runt
 docs/            # documentação — comece pelo docs/README.md
 ```
 
-A lógica de negócio mora em `comum/`, e não nas rotas ou nas telas, porque é o que permite testá-la sem subir shell nem banco: os **232 testes** cobrem `comum/` e as partes puras do importador.
+A lógica de negócio mora em `comum/`, e não nas rotas ou nas telas, porque é o que permite testá-la sem subir shell nem banco: os **268 testes** cobrem `comum/` e as partes puras do importador.
 
 ## Desenvolvimento
 
-Pré-requisito: **PAT do GitHub com `read:packages`** (o `@urbiverso/sdk` é privado, na org `urbiverso`). Configure uma vez no `~/.npmrc`:
+Pré-requisito: **PAT *classic* do GitHub com `read:packages`** (o `@urbiverso/sdk` é privado, na org `urbiverso`; o registry npm do GitHub não autentica PAT fine-grained). O `.npmrc` do repo já lê o token do ambiente — exporte a variável, não escreva o segredo em arquivo:
 
+```bash
+export URBIVERSO_PACKAGES_TOKEN=<PAT classic com read:packages>
 ```
-//npm.pkg.github.com/:_authToken=SEU_PAT_read_packages
-```
+
+**Sem essa variável o sintoma não parece de credencial.** O `.npmrc` do projeto expande `${URBIVERSO_PACKAGES_TOKEN}`, e quando a variável não existe o pnpm **descarta o arquivo inteiro** — um `WARN  Failed to replace env in config` e pronto. Junto com o token cai a linha `@urbiverso:registry`, então `@urbiverso/sdk` passa a ser procurado no npmjs.org, que responde **404** em vez de 401. Se vir isso, confira a variável antes de suspeitar do PAT.
 
 Depois:
 
 ```bash
-pnpm install        # gera o pnpm-lock.yaml (commit necessário para o CI)
+pnpm install        # --frozen-lockfile no CI; o pnpm-lock.yaml é versionado
 pnpm build          # esbuild → backend/rotas.js + frontend/index.js
 pnpm test           # testes das funções puras (node:test via tsx)
 pnpm typecheck      # tsc --noEmit
@@ -57,6 +59,21 @@ O workflow `.github/workflows/release.yml` empacota e publica um GitHub Release.
 - **push de tag** `reg360-v<x.y.z>_<sha8>` (a versão deve bater com `manifesto.json`).
 
 O release anexa `reg360-<versao>.urbiapp.tgz` + `.sha256`. Na instância: `Admin → Apps → Instalar` (do release do repo ou upload do tarball). Após instalar, habilite as flags de Núcleo e atribua os papéis — ver [`docs/operacao.md`](docs/operacao.md).
+
+### Os dois pisos de plataforma
+
+O `manifesto.json` declara **dois pisos independentes e cumulativos** — a instância precisa atender aos dois:
+
+| Piso | Valor | O que atesta |
+|---|---|---|
+| `sdk_min` | `52` | O nível de `@urbiverso/sdk` contra o qual o app compila (inteiro, nunca `"52.0.0"`) |
+| `shell_min` | `"0.53.10"` | Que o **gate de `sdk_min` existe** naquela instância |
+
+O par não é redundância. O validador de manifesto **ignora chave desconhecida**: num shell anterior a `0.53.10` o `sdk_min` não é reprovado — ele simplesmente não é visto, e o app instala limpo para quebrar na primeira chamada. `shell_min` é o que fecha esse buraco.
+
+`sdk_min` copia o major do SDK do `package.json` (`"@urbiverso/sdk": "52.0.0"` → `52`), como manda a doc do SDK: quem compila contra o 52 roda no 52, e declarar 52 **nunca subdeclara**. Sobredeclarar custa recusa numa instância mais velha; subdeclarar custa quebra em runtime na instância de outra pessoa — assimetria que decide a regra.
+
+**Mexer em qualquer um dos dois faz a `versao` do manifesto avançar**, mesmo sem migração: sem isso, duas builds com o mesmo `x.y.z` passariam a exigir plataformas diferentes.
 
 **A release nasce NÃO homologada**, sempre (`--prerelease`). No shell, "homologada" é o campo nativo `prerelease` do GitHub invertido, e homologar é ato de quem atesta — não propriedade do build.
 

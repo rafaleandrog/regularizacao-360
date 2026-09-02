@@ -23,15 +23,21 @@ jobs:
           node-version: 20
           registry-url: 'https://npm.pkg.github.com'
       - name: Instalar dependências
-        # Sem --frozen-lockfile: o repo ainda não tem pnpm-lock.yaml commitado
-        # (o SDK privado exige token, gerado só localmente). Ao commitar o
-        # lockfile, trocar aqui e no release.yml. Ver issue #3.
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
         env:
           # @urbiverso/sdk é privado (GitHub Packages, org urbiverso). O GITHUB_TOKEN
           # efêmero deste repo NÃO tem read:packages cross-org (401), então usamos o
           # PAT guardado no secret URBIVERSO_PACKAGES_TOKEN.
+          #
+          # As DUAS variáveis são necessárias, e por motivos diferentes. O .npmrc do
+          # PROJETO expande ${URBIVERSO_PACKAGES_TOKEN}; quando a var não existe, o pnpm
+          # não deixa o token vazio — ele DESCARTA O ARQUIVO INTEIRO, com um WARN
+          # ("Failed to replace env in config"). Junto com o token cai a linha
+          # `@urbiverso:registry`, e aí `@urbiverso/sdk` é procurado no npmjs.org, que
+          # responde 404 — sintoma que não parece de credencial, e NODE_AUTH_TOKEN
+          # preenchido não salva. Medido nesta sessão com `pnpm config get`.
           NODE_AUTH_TOKEN: ${{ secrets.URBIVERSO_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+          URBIVERSO_PACKAGES_TOKEN: ${{ secrets.URBIVERSO_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
       - name: Typecheck
         run: pnpm typecheck
       - name: Testes

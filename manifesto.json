@@ -1,8 +1,9 @@
 {
   "nome": "Regularização 360",
-  "versao": "0.9.0",
+  "versao": "0.9.1",
   "descricao": "Gestão do ciclo de vida da regularização fundiária — navegação territorial, propostas comerciais e acompanhamento de status.",
-  "shell_min": "0.51.0",
+  "shell_min": "0.53.10",
+  "sdk_min": 52,
   "permissao_padrao": "leitura",
   "roles": {
     "escrita": {

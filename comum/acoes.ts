@@ -217,3 +217,55 @@ export function lerFiltroImovel(
   }
   return { filtro: { imovel_id: id, imovel_tipo: String(query?.imovel_tipo) } };
 }
+
+/**
+ * O que precisa acontecer para a lista de pessoas de uma ação existente virar
+ * a lista que o usuário montou na tela.
+ *
+ * Só existe porque **não há rota de PATCH de vínculo**: `acao_pessoas` aceita
+ * criar e remover, e nada mais. Trocar o papel de alguém é, no protocolo, uma
+ * remoção seguida de uma criação — e é exatamente o passo que se esquece de
+ * fazer quando a tela compara só o conjunto de `pessoa_id`. Comparar por
+ * `pessoa_id` **e** papel é o que faz a troca de papel virar operação.
+ *
+ * A ordem importa e é responsabilidade de quem executa: **remover antes de
+ * adicionar**. `lerVinculosPessoa` deduplica por `pessoa_id`, então uma pessoa
+ * tem no máximo um papel; adicionar primeiro esbarraria no vínculo antigo, que
+ * a rota trata como idempotente e devolve intacto — a troca de papel sumiria
+ * sem erro nenhum.
+ */
+export function diffVinculosPessoa(
+  atuais: Array<{ id: number; pessoa_id: number; papel?: string | null }> | null | undefined,
+  desejados: Array<{ pessoa_id: number; papel?: string | null }> | null | undefined,
+): { remover: number[]; adicionar: Required<VinculoPessoa>[] } {
+  const antes = new Map<number, { id: number; papel: string }>();
+  for (const v of atuais || []) {
+    const id = Number(v?.pessoa_id);
+    if (!Number.isInteger(id) || id < 1) continue;
+    antes.set(id, { id: Number(v.id), papel: String(v.papel ?? 'interessado') });
+  }
+
+  const depois = new Map<number, string>();
+  for (const v of desejados || []) {
+    const id = Number(v?.pessoa_id);
+    if (!Number.isInteger(id) || id < 1) continue;
+    if (depois.has(id)) continue;
+    depois.set(id, String(v.papel ?? 'interessado'));
+  }
+
+  const remover: number[] = [];
+  const adicionar: Required<VinculoPessoa>[] = [];
+
+  for (const [pessoaId, vinculo] of antes) {
+    const papelNovo = depois.get(pessoaId);
+    if (papelNovo === undefined) { remover.push(vinculo.id); continue; }
+    if (papelNovo !== vinculo.papel) remover.push(vinculo.id);
+  }
+  for (const [pessoaId, papel] of depois) {
+    const vinculo = antes.get(pessoaId);
+    if (vinculo && vinculo.papel === papel) continue;
+    adicionar.push({ pessoa_id: pessoaId, papel: papel as PapelPessoa });
+  }
+
+  return { remover, adicionar };
+}

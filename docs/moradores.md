@@ -98,6 +98,16 @@ Uma exceção que não é exceção: o app extrai os **dígitos** do CPF para a 
 
 `POST /moradores/desvincular/:loteId/:vinculoId`, com confirmação na tela. Rota separada porque é a operação inversa: juntá-la ao cadastro faria um formulário de criação carregar poder de apagar.
 
+## Ações da pessoa
+
+O detalhe do morador lista as ações judiciais em que ela é parte, com os mesmos cartões da aba do lote. A fonte é `GET /acoes?pessoa_id=`.
+
+**É a única tela onde ação sem imóvel aparece.** A aba do lote filtra por `imovel_id`+`imovel_tipo`, então ação registrada só contra uma pessoa não cabe nela — não por omissão, mas porque não há imóvel por onde encontrá-la. Aqui ela aparece.
+
+Editar e remover seguem o gate de sempre (`criador` ou admin da app); **registrar** ação continua sendo pela aba Ações do imóvel. O contrato dos vínculos de pessoa — inclusive por que trocar o papel de alguém é remover mais criar — está em [`acoes.md`](acoes).
+
+**A tela não busca nome de pessoa para os vínculos.** O backend não lê o Núcleo, então o vínculo devolve só `pessoa_id`. O nome aparece onde a tela já o viu: nos ocupantes do lote aberto, na pessoa aberta, ou no resultado da busca do formulário de ação. Id que não resolve fica **à mostra** (`#123`) em vez de sumir.
+
 ## O que ainda não existe
 
-**Aba de Ações na pessoa** (issue #32). Ação que existe só contra alguém, sem imóvel vinculado, ainda não aparece em tela nenhuma. Agora que a tela da pessoa existe, é ali que ela entra.
+**Criar ação a partir da pessoa.** O backend aceita ação só com pessoa; a tela do morador só lista. É o caso de uma ação que nasce sem imóvel — hoje ela precisa ser registrada a partir de um lote e depois ter o imóvel desvinculado.
