@@ -60,9 +60,23 @@ Duas leituras alimentam o painel do imóvel, e as duas podem não ter acontecido
 
 - **A frase "Sem preço definido: não há contrato, preço manual, nem proposta vigente na cascata"** é afirmação sobre **três** fontes, e exige as duas leituras concluídas. Sem isso ela sai enquanto a tela ainda está lendo.
 - **Nenhum botão de escrita antes de a leitura concluir.** Este não é zelo genérico: com `imovel_dados` em `{}`, a tela oferecia *"Gravar preço de contrato"* para um imóvel que **tem** contrato, e o backend respondia **409 `REG360_PRECO_ESTATICO_GRAVADO`**. Botão que a API recusa não entra — a regra é do `CLAUDE.md`, e aqui ela dependia de um estado que ninguém tinha conferido.
-- **`…` no lugar de `—` enquanto não leu.** No KPI de preço, `—` diz "não tem"; enquanto a leitura corre, o que ele diz é "não sei". A distinção é a mesma de `comum/referencias.ts`.
 - **A resposta guardada tem que ser a leitura certa.** `_acaoPreco` guardava em `dadosDoImovel` o retorno de qualquer ação do imóvel — inclusive o de desvincular morador, que é `{ removido: true, … }` e não tem `quitado` nem `preco_estatico`. Desvincular um morador fazia o badge "Quitado" sumir e o botão de gravar contrato reaparecer. Não é falta de leitura: é a resposta errada no lugar dela, e nenhuma guarda de estado pega isso — só o chamador dizendo se a resposta é o registro.
-- **Uma frase por leitura que faltou**, como banner de aviso. Falha de contexto é a mais silenciosa das duas: ela não some da tela, ela **muda o número** e o apresenta como fato.
+- **Uma frase por leitura que faltou**, como banner de aviso — `erro` quando a leitura falhou de fato, `alerta` enquanto ela só está em curso. Falha de contexto é a mais silenciosa das duas: ela não some da tela, ela **muda o número** e o apresenta como fato.
+
+### `…` no lugar de `—`, e por que é uma decisão só
+
+No KPI de preço, `—` diz "não tem"; enquanto uma leitura relevante ainda não concluiu, o que ele diz é "não sei" — a mesma distinção de `comum/referencias.ts`. O painel mostra **quatro** KPIs de preço, e nem todos dependem das duas leituras do mesmo jeito:
+
+| KPI | Depende de | Marcador de ausência |
+|---|---|---|
+| Preço de contrato | só `imovel_dados` | `…` enquanto ela corre ou falha, `—` só depois de concluída |
+| Preço proposta vigente | só o contexto (a cascata) | `…` enquanto ele corre ou falha, `—` só depois de concluído |
+| Valor do imóvel | as **duas** | `marcadorPrecoAusente` |
+| Preço final | as **duas** | `marcadorPrecoAusente` |
+
+Os dois primeiros ecoam ou derivam de **uma fonte só**, e cada um pode decidir sozinho olhando a leitura correspondente. Os dois últimos são o preço aplicável — o resultado da precedência inteira — e por isso dependem de que **ambas** as leituras tenham concluído: um contrato lido não basta se a cascata que resolveria o preço na ausência dele ainda não foi consultada, e vice-versa.
+
+Antes deste conserto, "Valor do imóvel" e "Preço final" olhavam só a leitura de `imovel_dados` e ignoravam a do contexto — com o contrato lido e a cascata **falha**, os dois mostravam `—` ("não tem preço") quando o certo era `…` ("não sei", porque a cascata pode ter pulado elos e o preço real ser outro). `marcadorPrecoAusente` (`comum/preco.ts`) existe para que essa combinação não seja decidida duas vezes de jeitos diferentes: é a mesma condição que libera `podeAfirmarSemPreco` — as duas leituras concluídas — reaproveitada como valor de exibição, para os dois KPIs cujo número é fruto das duas fontes.
 
 ## Descontos
 

@@ -47,8 +47,8 @@ Por isso `estadoDaQuitacao(leitura, dados)` (`comum/quitacao.ts`) tem quatro est
 
 | Estado | Na tela |
 |---|---|
-| `nao_lida` | badge "Quitação: consultando…" — nenhuma afirmação |
-| `falhou` | badge "Quitação: não foi possível ler" |
+| `falhou` | badge vermelho (`cor="erro"`) "Quitação: não foi possível ler" |
+| `nao_lida` | badge neutro "Quitação: consultando…" — nenhuma afirmação |
 | `quitado` | o badge verde, com data e autoria |
 | `nao_quitado` | nada — e aqui o silêncio **significa** mesmo não quitado |
 

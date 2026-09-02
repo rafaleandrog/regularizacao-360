@@ -217,6 +217,48 @@ describe('controlesDePreco — leitura que não concluiu não vira afirmação n
     assert.equal(controlesDePreco(LIDO, {}, ADMIN).podeAfirmarSemPreco, true);
   });
 
+  // O defeito real: "Valor do imóvel" e "Preço final" olhavam só a leitura de
+  // `dados` para escolher entre "…" e "—". Com `dados` concluída e `contexto`
+  // falhada, `preco` vem `null` porque a cascata pulou elos — não porque as
+  // três fontes foram checadas — e o KPI dizia "—" (que por
+  // `comum/referencias.ts` significa "não tem") com cara de número apurado.
+  describe('marcadorPrecoAusente — KPI de preço que depende das duas leituras', () => {
+    test('contexto falhado com dados concluída: ainda é "não sei", não "não tem"', () => {
+      const c = controlesDePreco({ dados: 'concluida', contexto: 'falhou' }, {}, ADMIN);
+      assert.equal(c.marcadorPrecoAusente, '…');
+    });
+
+    test('dados falhada com contexto concluído também é "não sei"', () => {
+      const c = controlesDePreco({ dados: 'falhou', contexto: 'concluida' }, {}, ADMIN);
+      assert.equal(c.marcadorPrecoAusente, '…');
+    });
+
+    test('as duas concluídas: aí sim "não tem"', () => {
+      const c = controlesDePreco(LIDO, {}, ADMIN);
+      assert.equal(c.marcadorPrecoAusente, '—');
+    });
+
+    // Assert de distinção: os dois estados têm que produzir marcadores
+    // DIFERENTES — se convergissem, a distinção que este campo existe para
+    // fazer teria sumido de volta no valor.
+    test('leitura incompleta e leitura completa nunca convergem para o mesmo marcador', () => {
+      const incompleto = controlesDePreco({ dados: 'concluida', contexto: 'correndo' }, {}, ADMIN).marcadorPrecoAusente;
+      const completo = controlesDePreco(LIDO, {}, ADMIN).marcadorPrecoAusente;
+      assert.notEqual(incompleto, completo);
+    });
+
+    test('acompanha podeAfirmarSemPreco — mesma leitura decide os dois', () => {
+      for (const leituras of [
+        { dados: 'concluida', contexto: 'concluida' },
+        { dados: 'falhou', contexto: 'concluida' },
+        { dados: 'concluida', contexto: 'correndo' },
+      ] as LeiturasDoPreco[]) {
+        const c = controlesDePreco(leituras, {}, ADMIN);
+        assert.equal(c.marcadorPrecoAusente, c.podeAfirmarSemPreco ? '—' : '…');
+      }
+    });
+  });
+
   test('cada leitura pendente rende um aviso, e as duas concluídas não rendem nenhum', () => {
     assert.equal(controlesDePreco(LIDO, {}, ADMIN).avisos.length, 0);
     assert.equal(controlesDePreco({ dados: 'falhou', contexto: 'concluida' }, {}, ADMIN).avisos.length, 1);

@@ -177,6 +177,18 @@ export interface ControlesDePreco {
    * exige que as duas leituras tenham concluído.
    */
   podeAfirmarSemPreco: boolean;
+  /**
+   * O marcador para um KPI cujo valor depende do preço aplicável (Valor do
+   * imóvel, Preço final): `'…'` enquanto falta uma leitura que ainda poderia
+   * transformar `preço aplicável === null` num preço real (a de `dados`, que
+   * traz estático/manual, OU a de `contexto`, da qual a proposta em cascata
+   * depende), `'—'` só depois que as duas concluíram e mesmo assim não há
+   * preço. Sem isto, cada KPI decidia sozinho e só olhava `dados`: com
+   * `dados` concluída e `contexto` falhada, "Valor do imóvel" e "Preço final"
+   * diziam `—` — que por `comum/referencias.ts` significa "não tem" — quando
+   * o correto era "não sei", porque a cascata pode ter pulado elos.
+   */
+  marcadorPrecoAusente: '…' | '—';
   gravarContrato: boolean;
   corrigirContrato: boolean;
   definirManual: boolean;
@@ -226,8 +238,11 @@ export function controlesDePreco(
   const temContrato = numero(imovelDados?.preco_estatico) !== null;
   const temManual = numero(imovelDados?.preco_m2_manual) !== null;
 
+  const podeAfirmarSemPreco = dadosLidos && leituras.contexto === 'concluida';
+
   return {
-    podeAfirmarSemPreco: dadosLidos && leituras.contexto === 'concluida',
+    podeAfirmarSemPreco,
+    marcadorPrecoAusente: podeAfirmarSemPreco ? '—' : '…',
     gravarContrato: podeCriar && !temContrato,
     corrigirContrato: podeCriar && temContrato && Boolean(perm?.ehAdmin),
     definirManual: podeCriar,

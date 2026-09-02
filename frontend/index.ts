@@ -8,7 +8,7 @@ import { rotuloReferencia } from '../comum/referencias.js';
 import { mapaComLimite } from '../comum/concorrencia.js';
 import {
   precoAplicavel, valorDoImovel, aplicarDescontos, type FormaPagamento,
-  controlesDePreco,
+  controlesDePreco, TEXTO_LEITURA_PRECO, TEXTO_LEITURA_CASCATA,
 } from '../comum/preco.js';
 import {
   agregarImoveis, somarAgregados, indexarPropostas, chaveImovel, type Agregado,
@@ -660,7 +660,14 @@ export class AppReg360 extends LitElement {
    */
   private async _carregarContextoDoImovel() {
     const d = this.detalhe;
-    if (!d) return;
+    if (!d) {
+      // `_carregar()` já pôs 'correndo' antes deste `await` rodar. Sem fechar
+      // aqui, a saída antecipada deixava a leitura presa em 'correndo' para
+      // sempre — sem imóvel carregado não há contexto a resolver, e isso não
+      // é falha, é "nada a fazer".
+      this.leituraContextoDoImovel = 'concluida';
+      return;
+    }
     this.leituraContextoDoImovel = 'correndo';
     this.paiDoImovel = {};
     this.unidadesDoLote = [];
@@ -1843,14 +1850,15 @@ export class AppReg360 extends LitElement {
   }
 
   /**
-   * Número puro que veio da carga da view. Mesmos três estados; sem substantivo
-   * porque o rótulo do KPI já o diz.
+   * Número puro a partir do estado de UMA leitura específica. Recebe o
+   * `EstadoContagem` já pronto — não lê `this.cargaFalhou` — porque
+   * `_carregarPropostas` tem `try/catch` próprio desde este PR e nunca marca
+   * `cargaFalhou`: uma falha ali resultava em `estadoDaContagem` avaliar
+   * `{correndo:false, falhou:false}` = `'concluida'`, e o KPI de propostas
+   * aprovadas voltava a mostrar "0" depois de uma leitura que não aconteceu.
    */
-  private _rotuloCarga(quantidade: number): string {
-    const texto = TEXTO_CARGA[estadoDaContagem({
-      correndo: this.carregando,
-      falhou: this.cargaFalhou,
-    })];
+  private _rotuloCarga(quantidade: number, estado: EstadoContagem): string {
+    const texto = TEXTO_CARGA[estado];
     return texto ?? String(quantidade);
   }
 
@@ -2071,9 +2079,27 @@ export class AppReg360 extends LitElement {
     `;
   }
 
+  /**
+   * O que mostrar no lugar do detalhe enquanto `this.detalhe` é `null`.
+   *
+   * `_carregar()` zera `detalhe` no início de toda carga — inclusive na que
+   * vai FALHAR. Antes, os cinco renders de detalhe caíam todos no mesmo
+   * `<urbi-loading>`, e uma falha virava spinner GIRANDO PARA SEMPRE em vez
+   * de "não foi possível carregar" — `cargaFalhou` já estava marcado, só
+   * ninguém perguntava.
+   */
+  private _renderEsperaDetalhe(): TemplateResult {
+    if (this.cargaFalhou) {
+      return html`<urbi-estado-vazio icone="fa-solid fa-triangle-exclamation"
+        mensagem="Não foi possível carregar este item"
+        submensagem="A leitura falhou — o que aparecia antes não é mais confiável. Tente recarregar."></urbi-estado-vazio>`;
+    }
+    return html`<urbi-loading></urbi-loading>`;
+  }
+
   private _renderDetalheSetor(): TemplateResult {
     const sh = this.detalhe;
-    if (!sh) return html`<urbi-loading></urbi-loading>`;
+    if (!sh) return this._renderEsperaDetalhe();
     const ag = this._agregar(this.parcelamentos);
     return html`
       <urbi-botao variante="fantasma" icone="fa-solid fa-arrow-left" pequeno @click=${() => this._navegar('/')}>Voltar</urbi-botao>
@@ -2082,7 +2108,7 @@ export class AppReg360 extends LitElement {
         <urbi-kpi rotulo="Parcelamentos" .valor=${this._rotuloParcelamentos(this.parcelamentos.length)} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Lotes" .valor=${this._rotuloLotes(ag.quantidade)} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Área dos lotes (m²)" .valor=${this._rotuloAreaDosLotes(ag.area)} formato="texto"></urbi-kpi>
-        <urbi-kpi rotulo="Propostas aprovadas" .valor=${this._rotuloCarga(this.propostas.filter((p) => p.status_aprovacao === 'aprovada').length)} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Propostas aprovadas" .valor=${this._rotuloCarga(this.propostas.filter((p) => p.status_aprovacao === 'aprovada').length, this.leituraPropostas)} formato="texto"></urbi-kpi>
       </urbi-wrap>
       ${this._renderVgv(somarAgregados(this.parcelamentos.map((p) => this._agregadoDoParcelamento(p.id))))}
       ${this.parcelamentosSemSetor.length > 0
@@ -2130,7 +2156,7 @@ export class AppReg360 extends LitElement {
 
   private _renderDetalheParcelamento(): TemplateResult {
     const p = this.detalhe;
-    if (!p) return html`<urbi-loading></urbi-loading>`;
+    if (!p) return this._renderEsperaDetalhe();
     const reg = this.regularizacaoPorParcelamento.get(Number(p.id)) || {};
     const faseBruta = this._faseDe(p.id);
     const fase = faseBruta === null ? BADGE_FASE_NAO_LIDA : badgeFase(faseBruta);
@@ -2262,11 +2288,14 @@ export class AppReg360 extends LitElement {
       ></urbi-tabela>
 
       ${this.leituraMatriculas === 'falhou'
-        ? html`<p class="prop-meta">
+        // Banner, não `<p>` + botão solto: é o par cor+ícone+contraste que
+        // o primitivo já resolve (ui.md — "não reimplemente banner + botão
+        // solto pra evitar acertar cor/contraste na mão").
+        ? html`<urbi-banner variante="erro">
             A lista de matrículas não carregou — a coluna Matrícula mostra <strong>…</strong>
             (não resolvida), que não é o mesmo que <strong>—</strong> (não tem).
-            <urbi-botao variante="fantasma" pequeno @click=${() => void this._carregarMatriculas()}>Tentar de novo</urbi-botao>
-          </p>`
+            <urbi-botao slot="acao" variante="fantasma" pequeno @click=${() => void this._carregarMatriculas()}>Tentar de novo</urbi-botao>
+          </urbi-banner>`
         : nothing}
 
       ${this.lotesComFalhaDePessoas.size > 0
@@ -2301,7 +2330,7 @@ export class AppReg360 extends LitElement {
    */
   private _renderDetalheImovel(): TemplateResult {
     const u = this.detalhe;
-    if (!u) return html`<urbi-loading></urbi-loading>`;
+    if (!u) return this._renderEsperaDetalhe();
     const ehLote = this.rota.view === 'lote';
     const mat = this.matriculasPorId.get(Number(u.matricula_id));
     const ocupantes = this.pessoasPorLote.get(Number(u.id)) || [];
@@ -2338,11 +2367,16 @@ export class AppReg360 extends LitElement {
             return html`<urbi-badge cor="sucesso">Quitado${this._quitacao.em ? ` em ${soData(this._quitacao.em)}` : ''}${this._quitacao.porNome ? ` · ${this._quitacao.porNome}` : ''}</urbi-badge>`;
           }
           const texto = TEXTO_QUITACAO[eq];
-          return texto ? html`<urbi-badge cor="padrao">${texto}</urbi-badge>` : nothing;
+          // `falhou` é erro de leitura; `nao_lida` é só "ainda consultando" —
+          // a mesma cor nos dois apagava a distinção que este badge existe
+          // para preservar.
+          return texto ? html`<urbi-badge cor=${eq === 'falhou' ? 'erro' : 'padrao'}>${texto}</urbi-badge>` : nothing;
         })()}
       </urbi-wrap>
       ${this.avisoHerancaUnidade
-        ? html`<urbi-banner variante="aviso">${this.avisoHerancaUnidade}</urbi-banner>`
+        // Aviso explicativo (a herança pulou um nível), não uma falha —
+        // `alerta` é a variante correta; `aviso` não existe no contrato.
+        ? html`<urbi-banner variante="alerta">${this.avisoHerancaUnidade}</urbi-banner>`
         : nothing}
       ${this.podeAprovar ? this._renderBotaoQuitacao() : nothing}
       ${estadoOcupantes === 'com_ocupantes'
@@ -2380,10 +2414,10 @@ export class AppReg360 extends LitElement {
         <urbi-kpi rotulo="Matrícula" .valor=${rotuloReferencia(mat ? nomeDe(mat) : null, u.matricula_id)} formato="texto"></urbi-kpi>
       </urbi-wrap>
       ${this.leituraMatriculas === 'falhou' && u.matricula_id
-        ? html`<p class="prop-meta">
+        ? html`<urbi-banner variante="erro">
             A lista de matrículas não carregou — o <strong>…</strong> acima é isso, não ausência de matrícula.
-            <urbi-botao variante="fantasma" pequeno @click=${() => void this._carregarMatriculas()}>Tentar de novo</urbi-botao>
-          </p>`
+            <urbi-botao slot="acao" variante="fantasma" pequeno @click=${() => void this._carregarMatriculas()}>Tentar de novo</urbi-botao>
+          </urbi-banner>`
         : nothing}
       ${this.unidadesDoLote.length > 0
         ? html`
@@ -2608,7 +2642,7 @@ export class AppReg360 extends LitElement {
    */
   private _renderDetalheMorador(): TemplateResult {
     const p = this.detalhe;
-    if (!p) return html`<urbi-loading></urbi-loading>`;
+    if (!p) return this._renderEsperaDetalhe();
     const s = this._situacaoDe(p);
     const b = BADGE_SITUACAO[s.estado];
     return html`
@@ -2755,7 +2789,7 @@ export class AppReg360 extends LitElement {
 
   private _renderProposta(): TemplateResult {
     const p = this.detalhe as Proposta | null;
-    if (!p) return html`<urbi-loading></urbi-loading>`;
+    if (!p) return this._renderEsperaDetalhe();
     return html`
       <urbi-botao variante="fantasma" icone="fa-solid fa-arrow-left" pequeno @click=${() => this._navegar(`/${p.nivel === 'setor' ? 'setor' : p.nivel}/${p.ref_id}`)}>Voltar</urbi-botao>
       <h2>${p.titulo}</h2>
@@ -3142,16 +3176,30 @@ export class AppReg360 extends LitElement {
     // que ele diz é "não sei" — e são coisas diferentes (`comum/referencias.ts`).
     const naoLido = this.leituraDadosDoImovel !== 'concluida';
 
+    // `ctrl.avisos` só traz o texto — a variante (`aviso` não existe no
+    // contrato do banner) depende de qual leitura falhou de qual só está em
+    // curso, e isso `ControlesDePreco` não carrega. Deriva-se aqui, das duas
+    // leituras que já estão à mão: `erro` para leitura que falhou de fato,
+    // `alerta` para leitura ainda em andamento.
+    const avisosPreco: Array<{ texto: string; variante: 'erro' | 'alerta' }> = [
+      this.leituraDadosDoImovel !== 'concluida'
+        ? { texto: TEXTO_LEITURA_PRECO[this.leituraDadosDoImovel]!, variante: this.leituraDadosDoImovel === 'falhou' ? 'erro' as const : 'alerta' as const }
+        : null,
+      this.leituraContextoDoImovel !== 'concluida'
+        ? { texto: TEXTO_LEITURA_CASCATA[this.leituraContextoDoImovel]!, variante: this.leituraContextoDoImovel === 'falhou' ? 'erro' as const : 'alerta' as const }
+        : null,
+    ].filter((a): a is { texto: string; variante: 'erro' | 'alerta' } => a !== null);
+
     return html`
-      ${ctrl.avisos.map((a) => html`<urbi-banner variante="aviso">${a}</urbi-banner>`)}
+      ${avisosPreco.map((a) => html`<urbi-banner variante=${a.variante}>${a.texto}</urbi-banner>`)}
       <urbi-wrap>
-        <urbi-kpi rotulo="Valor do imóvel" .valor=${valor === null ? (naoLido ? '…' : '—') : fmtMoeda(valor)} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Valor do imóvel" .valor=${valor === null ? ctrl.marcadorPrecoAusente : fmtMoeda(valor)} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Preço proposta vigente (R$/m²)"
           .valor=${vigente ? fmtMoeda(vigente.preco_m2) : (this.leituraContextoDoImovel === 'concluida' ? '—' : '…')} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Preço de contrato (R$/m²)"
           .valor=${d.preco_estatico != null ? fmtMoeda(d.preco_estatico) : (naoLido ? '…' : '—')} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Preço final (R$/m²)"
-          .valor=${preco === null ? (naoLido ? '…' : '—') : fmtMoeda(preco)} formato="texto"></urbi-kpi>
+          .valor=${preco === null ? ctrl.marcadorPrecoAusente : fmtMoeda(preco)} formato="texto"></urbi-kpi>
       </urbi-wrap>
       <p class="prop-meta">
         ${origem
