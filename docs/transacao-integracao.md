@@ -34,6 +34,7 @@ Um `grep -i transac` fora desses três não deve achar lógica de negócio. Se a
    O frontend **pergunta ao servidor** (`GET /transacoes-estado`) uma vez por sessão e memoriza: `DISPONIVEL` é só o padrão de build. Sem isso, ligar a integração no backend não teria efeito em cliente com bundle antigo em cache. Falha de rede mantém o que já se sabia — tratá-la como "indisponível" faria uma queda momentânea esconder a aba inteira.
 5. **Trocar `DISPONIVEL` para `true`.**
 6. Conferir que a aba do lote mostra as transações, que as três datas de assinatura preenchem e que o badge de estágio aparece no cabeçalho — tudo isso **já está escrito e testado** com dados sintéticos.
+7. **Olhar o banner de catálogo divergente.** Se ele aparecer, os tipos do Núcleo não batem com `TIPOS_TRANSACAO` — reconcilie antes de dar a virada por concluída, senão o estágio fica errado para todo imóvel que usa um tipo não mapeado. Ver a seção sobre o catálogo, abaixo. É a **#80**.
 
 ## Duas decisões de derivação que valem ler antes de mexer
 
@@ -45,9 +46,26 @@ Um `grep -i transac` fora desses três não deve achar lógica de negócio. Se a
 
 **Cancelada não conta em lugar nenhum.** Nem nas datas de assinatura, nem no estágio. Mostrar a data de uma transação cancelada diria que o imóvel caminhou onde ele voltou.
 
+## O catálogo de tipos pode divergir — e a divergência não fica muda
+
+`TIPOS_TRANSACAO` (`pre_contrato`, `promessa_compra_venda`, `cessao`, `escritura`) foi escrito **antes de a entidade existir no Núcleo**, quando não havia com o que conferir. O Núcleo tem o descritor como **fonte única**, em `GET /transacoes/tipos`, e o vocabulário dele é mais largo — a doc cita permuta, rescisão, usucapião.
+
+**Reconciliar as duas listas é pré-requisito da virada, não acabamento.** O motivo está no desenho das derivações: `tipoMaisAvancado` e `datasDeAssinatura` descartam tipo fora do catálogo, com um `continue`. Isso é correto — não há nível a atribuir a um tipo desconhecido, e comparar com `undefined` esconderia o problema atrás de uma comparação sempre falsa.
+
+Mas descartar **sem contar** é como a divergência vira invisível: o badge de estágio some de todos os lotes, as datas ficam vazias, e nada distingue isso de *"este imóvel não tem transação"*. A falha seria ausência, não erro — e ninguém procura o que não apareceu.
+
+Por isso existe `tiposDesconhecidos` em `comum/transacoes-contrato.ts`, e o aviso pronto para tela em `avisoCatalogoTransacao` (`frontend/transacoes.ts`). A aba do lote mostra um banner nomeando os tipos que o app não conhece e dizendo que o catálogo precisa ser reconciliado.
+
+Duas escolhas dentro dela:
+
+- **Rascunho conta.** Um rascunho de tipo desconhecido já é sinal de catálogo divergente; esperar ele ser assinado para avisar seria avisar tarde.
+- **Cancelada não conta.** O catálogo não precisa cobrir o que foi desfeito.
+
+A tela não conhece `TIPOS_TRANSACAO` — ela pergunta ao adaptador, que fala com `comum/`. A costura continua onde deveria.
+
 ## O `preco_estatico` é o substituto de hoje — e migra, não some
 
-Enquanto a Transação não existe, o **preço de contrato** (`imovel_dados.preco_estatico`, issue #26) é o único lugar onde o valor combinado de um contrato firmado sobrevive. É por isso que ele é imutável e tem gate próprio — ver [precos.md](precos).
+Enquanto a integração não está ligada, o **preço de contrato** (`imovel_dados.preco_estatico`, issue #26) é o único lugar onde o valor combinado de um contrato firmado sobrevive. É por isso que ele é imutável e tem gate próprio — ver [precos.md](precos).
 
 Quando a Transação existir, ele vira **dado migrável**, e a migração tem uma armadilha:
 

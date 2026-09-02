@@ -22,6 +22,7 @@ import {
   transacaoDisponivel,
   transacoesDoImovel,
   linhasDeAssinatura,
+  avisoCatalogoTransacao,
   badgeTransacao,
   MENSAGEM_INDISPONIVEL,
   garantirEstado,
@@ -2813,10 +2814,17 @@ export class AppReg360 extends LitElement {
    */
   private _renderTransacoes(): TemplateResult {
     const linhas = linhasDeAssinatura(this.transacoes);
+    // Tipo que o catálogo do app não conhece é descartado das derivações, e o
+    // descarte é mudo por desenho. Este aviso é o que impede o sintoma de virar
+    // "não há transação" — ver `tiposDesconhecidos` em comum/.
+    const avisoCatalogo = avisoCatalogoTransacao(this.transacoes);
     return html`
       ${transacaoDisponivel()
         ? nothing
         : html`<urbi-banner variante="alerta">${MENSAGEM_INDISPONIVEL}</urbi-banner>`}
+      ${avisoCatalogo
+        ? html`<urbi-banner variante="alerta">${avisoCatalogo}</urbi-banner>`
+        : nothing}
       <p class="secao-titulo">Datas de assinatura</p>
       <urbi-wrap>
         ${linhas.map((l) => html`
