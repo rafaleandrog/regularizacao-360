@@ -10,6 +10,7 @@ import {
   DISPONIVEL,
   TIPOS_TRANSACAO,
   NIVEL_ESTAGIO,
+  tiposDesconhecidos,
 } from '../../comum/transacoes-contrato.js';
 
 // Dados sintéticos do contrato — a entidade não existe no Núcleo, e a derivação
@@ -128,5 +129,59 @@ describe('o interruptor', () => {
     for (const tipo of TIPOS_TRANSACAO) {
       assert.equal(typeof NIVEL_ESTAGIO[tipo], 'number', `${tipo} sem nível`);
     }
+  });
+});
+
+describe('tiposDesconhecidos — a divergência de catálogo não some', () => {
+  const assinada = (tipo: string) => ({ tipo, data_assinatura: '2026-03-01' });
+
+  test('catálogo em dia não acusa nada', () => {
+    assert.deepEqual(
+      tiposDesconhecidos([assinada('pre_contrato'), assinada('escritura')]),
+      [],
+    );
+  });
+
+  // O cenário que a #80 previne: o Núcleo usa um vocabulário que este app não
+  // conhece. Sem esta função, `tipoMaisAvancado` devolve null, o badge some de
+  // todos os lotes e nada distingue isso de "não há transação".
+  test('tipo que o Núcleo tem e o app não vira lista, não silêncio', () => {
+    const transacoes = [assinada('usucapiao'), assinada('permuta'), assinada('escritura')];
+    assert.deepEqual(tiposDesconhecidos(transacoes), ['permuta', 'usucapiao']);
+    // E o comportamento antigo continua: o desconhecido não inventa estágio.
+    assert.equal(tipoMaisAvancado(transacoes), 'escritura');
+  });
+
+  test('badge some quando TODOS os tipos são desconhecidos — e é aí que a lista importa', () => {
+    const transacoes = [assinada('usucapiao'), assinada('permuta')];
+    assert.equal(badgeTransacao(transacoes), null);
+    assert.deepEqual(tiposDesconhecidos(transacoes), ['permuta', 'usucapiao']);
+  });
+
+  test('rascunho de tipo desconhecido também conta — esperar assinar é avisar tarde', () => {
+    assert.deepEqual(
+      tiposDesconhecidos([{ tipo: 'permuta', data_assinatura: null }]),
+      ['permuta'],
+    );
+  });
+
+  test('cancelada não conta: o catálogo não precisa cobrir o que foi desfeito', () => {
+    assert.deepEqual(
+      tiposDesconhecidos([{ tipo: 'permuta', data_assinatura: '2026-03-01', cancelada_em: '2026-04-01' }]),
+      [],
+    );
+  });
+
+  test('repetido aparece uma vez, e a ordem é estável', () => {
+    assert.deepEqual(
+      tiposDesconhecidos([assinada('usucapiao'), assinada('usucapiao'), assinada('permuta')]),
+      ['permuta', 'usucapiao'],
+    );
+  });
+
+  test('lista vazia, ausente e tipo em branco não quebram', () => {
+    assert.deepEqual(tiposDesconhecidos([]), []);
+    assert.deepEqual(tiposDesconhecidos(undefined as any), []);
+    assert.deepEqual(tiposDesconhecidos([{ tipo: '' }, { tipo: null }, {}]), []);
   });
 });

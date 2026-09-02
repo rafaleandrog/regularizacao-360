@@ -197,3 +197,37 @@ export function badgeTransacao(transacoes: any[]): { cor: string; rotulo: string
   if (!tipo) return null;
   return { cor: COR_TIPO_TRANSACAO[tipo], rotulo: ROTULO_TIPO_TRANSACAO[tipo] };
 }
+
+/**
+ * Tipos que vieram do Núcleo e o catálogo deste app não conhece.
+ *
+ * **É a contrapartida obrigatória do `continue` silencioso.** `tipoMaisAvancado`
+ * e `datasDeAssinatura` descartam tipo fora de `TIPOS_TRANSACAO` — e fazem
+ * certo, porque não há nível a atribuir a um tipo desconhecido e comparar com
+ * `undefined` esconderia o problema atrás de uma comparação sempre falsa.
+ *
+ * Mas descartar sem contar é como a divergência de catálogo vira invisível: o
+ * badge de estágio simplesmente **some de todos os lotes**, as datas ficam
+ * vazias, e nada distingue isso de "este imóvel não tem transação". A falha
+ * seria ausência, não erro — e ninguém procura o que não apareceu.
+ *
+ * `TIPOS_TRANSACAO` foi escrito antes de a entidade existir no Núcleo, e o
+ * Núcleo tem o descritor como fonte única em `GET /transacoes/tipos`. Enquanto
+ * as duas listas não forem reconciliadas (issue #80), esta função é o que
+ * transforma a divergência em algo que a tela pode dizer em voz alta.
+ *
+ * Conta **toda** transação não-cancelada, inclusive rascunho: um rascunho de
+ * tipo desconhecido já é sinal de que o catálogo divergiu, e esperar ele ser
+ * assinado para avisar seria avisar tarde.
+ */
+export function tiposDesconhecidos(transacoes: any[]): string[] {
+  const vistos = new Set<string>();
+  for (const t of transacoes || []) {
+    if (statusTransacao(t) === 'cancelada') continue;
+    const tipo = String(t?.tipo ?? '').trim();
+    if (!tipo) continue;
+    if ((TIPOS_TRANSACAO as readonly string[]).includes(tipo)) continue;
+    vistos.add(tipo);
+  }
+  return [...vistos].sort();
+}

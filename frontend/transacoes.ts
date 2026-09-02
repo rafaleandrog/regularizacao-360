@@ -6,6 +6,7 @@ import {
   datasDeAssinatura,
   ROTULO_TIPO_TRANSACAO,
   TIPOS_TRANSACAO,
+  tiposDesconhecidos,
   type Transacao,
   type TipoTransacao,
 } from '../comum/transacoes-contrato.js';
@@ -94,6 +95,25 @@ export function linhasDaTabela(
     data: t.data_assinatura ?? null,
     valor: t.valor ?? null,
   }));
+}
+
+/**
+ * Aviso de catálogo divergente, pronto para a tela, ou `null` quando não há.
+ *
+ * A tela não decide o que é tipo conhecido — quem sabe é o adaptador, e é ele
+ * que fala com `comum/`. Sem isto, o template teria de importar
+ * `TIPOS_TRANSACAO` para comparar, que é justamente o conhecimento de formato
+ * que este módulo existe para conter.
+ */
+export function avisoCatalogoTransacao(transacoes: Transacao[]): string | null {
+  const desconhecidos = tiposDesconhecidos(transacoes);
+  if (desconhecidos.length === 0) return null;
+  const lista = desconhecidos.join(', ');
+  const plural = desconhecidos.length > 1;
+  return `O Núcleo devolveu ${plural ? 'tipos' : 'um tipo'} de transação que este app não conhece `
+    + `(${lista}). ${plural ? 'Essas transações' : 'Essa transação'} não entra${plural ? 'm' : ''} no `
+    + 'estágio nem nas datas de assinatura, e o badge do cabeçalho pode sumir. '
+    + 'O catálogo do app precisa ser reconciliado com GET /transacoes/tipos.';
 }
 
 /**
