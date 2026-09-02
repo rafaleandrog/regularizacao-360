@@ -116,6 +116,6 @@ Falta o que depende de coisas fora daqui:
 | Catálogo de **Uso** e **Tipo de Lote** | Definição do negócio — e o destino é o objeto Lote do Núcleo, não uma tabela daqui |
 | **Transação** | A entidade existir no Núcleo. O adaptador está pronto, com interruptor único |
 | **Release e QA** na instância intermediária | Instalação na Pinguim |
-| `pnpm-lock.yaml` e piso de `sdk_min` | PAT com `read:packages` |
+| ~~`pnpm-lock.yaml` e piso de `sdk_min`~~ | **Resolvido** — lockfile versionado, `sdk_min: 52` e `shell_min: "0.53.10"` declarados |
 
 **Este doc é a fonte da verdade.** A spec v0.9 foi aposentada para [`historico/spec-v0.9.md`](historico/spec-v0.9) — ela registra as decisões e as datas, mas boa parte dela não descreve o app que existe.

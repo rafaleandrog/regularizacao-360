@@ -171,16 +171,16 @@ export class AppReg360 extends LitElement {
     :host { display: flex; flex-direction: column; flex: 1; min-height: 0; }
     .barra-acoes { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
     .prop-card {
-      border: 1px solid var(--cor-borda, rgba(255,255,255,.08));
+      border: 1px solid var(--cor-borda);
       border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px;
     }
     .prop-topo { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
     .prop-titulo { font-weight: 600; }
-    .prop-meta { color: var(--cor-texto-sec, rgba(255,255,255,.6)); font-size: .85rem; }
+    .prop-meta { color: var(--cor-texto-sec); font-size: .85rem; }
     .prop-acoes { display: flex; gap: 6px; flex-wrap: wrap; }
     .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .form-grid .full { grid-column: 1 / -1; }
-    .erro { color: var(--cor-erro, #D45A3A); }
+    .erro { color: var(--cor-erro); }
     .secao-titulo { margin: 16px 0 8px; font-weight: 600; }
   `;
 
