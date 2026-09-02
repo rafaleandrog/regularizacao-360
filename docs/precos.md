@@ -57,4 +57,14 @@ Os descontos são acumulativos: o de lote grande soma-se ao da forma de pagament
 
 `respeitaPiso()` compara o preço com `preco_minimo_residencial` ou `preco_minimo_comercial_misto`, conforme a **família de uso** do imóvel. É **informativo, nunca bloqueio** (RN-06): negociar abaixo do piso é decisão de negócio.
 
-A função está escrita e testada, mas **a tela ainda não a chama**: a família vem do catálogo de Uso, que é a issue #22 e ainda não existe. Passando `null`, a checagem não roda — melhor não checar do que checar contra a família errada.
+A função está escrita e testada, mas **a tela ainda não a chama** — e agora o motivo é mais preciso que "o catálogo não existe".
+
+O catálogo existe: `comum/catalogos.ts`. O que não existe é o **mapeamento de família** de cada uso, porque os valores de Uso nunca foram levantados (issue #22). `familiaDoUso()` devolve `null` para todos hoje, e passando `null` a checagem não roda — melhor não checar do que checar contra a família errada.
+
+### O `null` da família é perigoso, e por isso é visível
+
+`respeitaPiso(preco, proposta, null)` devolve `{ piso: null, abaixoDoPiso: false }`. Na tela, isso é **indistinguível de "respeita o piso"**. Ou seja: uso sem família não deixa a checagem imprecisa — deixa a checagem **desligada, com cara de aprovação**.
+
+Por isso `comum/catalogos.ts` expõe `usosSemFamilia()`, que lista os usos presentes no dado cuja família não é conhecida (tanto os fora do catálogo quanto os que estão nele com `familia: null`). Quando a tela de piso for ligada, é ela que permite dizer *"o piso não foi conferido para estes imóveis"* em vez de deixar passar em silêncio.
+
+É o mesmo princípio de `tiposDesconhecidos` em `transacoes-contrato.ts`: o descarte é legítimo, o silêncio não.
