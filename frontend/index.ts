@@ -8,7 +8,7 @@ import { rotuloReferencia } from '../comum/referencias.js';
 import { mapaComLimite } from '../comum/concorrencia.js';
 import {
   precoAplicavel, valorDoImovel, aplicarDescontos, type FormaPagamento,
-  controlesDePreco, TEXTO_LEITURA_PRECO, TEXTO_LEITURA_CASCATA,
+  controlesDePreco,
 } from '../comum/preco.js';
 import {
   agregarImoveis, somarAgregados, indexarPropostas, chaveImovel, type Agregado,
@@ -3176,22 +3176,12 @@ export class AppReg360 extends LitElement {
     // que ele diz é "não sei" — e são coisas diferentes (`comum/referencias.ts`).
     const naoLido = this.leituraDadosDoImovel !== 'concluida';
 
-    // `ctrl.avisos` só traz o texto — a variante (`aviso` não existe no
-    // contrato do banner) depende de qual leitura falhou de qual só está em
-    // curso, e isso `ControlesDePreco` não carrega. Deriva-se aqui, das duas
-    // leituras que já estão à mão: `erro` para leitura que falhou de fato,
-    // `alerta` para leitura ainda em andamento.
-    const avisosPreco: Array<{ texto: string; variante: 'erro' | 'alerta' }> = [
-      this.leituraDadosDoImovel !== 'concluida'
-        ? { texto: TEXTO_LEITURA_PRECO[this.leituraDadosDoImovel]!, variante: this.leituraDadosDoImovel === 'falhou' ? 'erro' as const : 'alerta' as const }
-        : null,
-      this.leituraContextoDoImovel !== 'concluida'
-        ? { texto: TEXTO_LEITURA_CASCATA[this.leituraContextoDoImovel]!, variante: this.leituraContextoDoImovel === 'falhou' ? 'erro' as const : 'alerta' as const }
-        : null,
-    ].filter((a): a is { texto: string; variante: 'erro' | 'alerta' } => a !== null);
-
+    // `ctrl.avisos` já traz texto e variante prontos — a tela só mapeia para
+    // o banner, não recalcula qual leitura gerou qual frase. Recalcular aqui
+    // era abrir uma segunda fonte da verdade: as duas hoje leem os mesmos
+    // dois `Record`, mas nada garante que continuem coincidindo.
     return html`
-      ${avisosPreco.map((a) => html`<urbi-banner variante=${a.variante}>${a.texto}</urbi-banner>`)}
+      ${ctrl.avisos.map((a) => html`<urbi-banner variante=${a.variante}>${a.texto}</urbi-banner>`)}
       <urbi-wrap>
         <urbi-kpi rotulo="Valor do imóvel" .valor=${valor === null ? ctrl.marcadorPrecoAusente : fmtMoeda(valor)} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Preço proposta vigente (R$/m²)"

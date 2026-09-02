@@ -273,4 +273,40 @@ describe('controlesDePreco — leitura que não concluiu não vira afirmação n
     assert.equal(TEXTO_LEITURA_PRECO.concluida, null);
     assert.equal(TEXTO_LEITURA_CASCATA.concluida, null);
   });
+
+  // O defeito real: a variante do aviso saía recalculada na tela, a partir
+  // dos mesmos dois `Record` que `controlesDePreco` já consulta — duas pontas
+  // computando a mesma coisa é segunda fonte da verdade, ainda que hoje
+  // coincidam. A variante nasce aqui, junto do texto.
+  describe('avisos — a variante acompanha o estado de cada leitura', () => {
+    test('leitura que falhou rende aviso "erro"', () => {
+      const c = controlesDePreco({ dados: 'falhou', contexto: 'concluida' }, {}, ADMIN);
+      assert.equal(c.avisos[0].variante, 'erro');
+    });
+
+    test('leitura em curso rende aviso "alerta"', () => {
+      const c = controlesDePreco({ dados: 'correndo', contexto: 'concluida' }, {}, ADMIN);
+      assert.equal(c.avisos[0].variante, 'alerta');
+    });
+
+    test('a leitura da cascata segue a mesma regra de variante que a de dados', () => {
+      assert.equal(controlesDePreco({ dados: 'concluida', contexto: 'falhou' }, {}, ADMIN).avisos[0].variante, 'erro');
+      assert.equal(controlesDePreco({ dados: 'concluida', contexto: 'correndo' }, {}, ADMIN).avisos[0].variante, 'alerta');
+    });
+
+    // Assert de distinção: "falhou" e "correndo" têm que produzir variantes
+    // DIFERENTES — se convergissem, a distinção que o banner existe para
+    // fazer (erro bloqueia leitura, alerta é transitório) sumiria no dado.
+    test('a variante de "falhou" nunca é a de "correndo"', () => {
+      const falhou = controlesDePreco({ dados: 'falhou', contexto: 'concluida' }, {}, ADMIN).avisos[0].variante;
+      const correndo = controlesDePreco({ dados: 'correndo', contexto: 'concluida' }, {}, ADMIN).avisos[0].variante;
+      assert.notEqual(falhou, correndo);
+    });
+
+    test('ordem preservada: dados primeiro, cascata depois', () => {
+      const c = controlesDePreco({ dados: 'falhou', contexto: 'falhou' }, {}, ADMIN);
+      assert.equal(c.avisos[0].texto, TEXTO_LEITURA_PRECO.falhou);
+      assert.equal(c.avisos[1].texto, TEXTO_LEITURA_CASCATA.falhou);
+    });
+  });
 });

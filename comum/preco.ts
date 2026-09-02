@@ -193,8 +193,19 @@ export interface ControlesDePreco {
   corrigirContrato: boolean;
   definirManual: boolean;
   limparManual: boolean;
-  /** Uma frase por leitura que não concluiu. Vazio quando as duas concluíram. */
-  avisos: string[];
+  /**
+   * Uma entrada por leitura que não concluiu, já com a `variante` do
+   * `urbi-banner` (`erro` para leitura que falhou, `alerta` para leitura em
+   * curso) — a tela só mapeia para o componente, não decide de novo qual
+   * variante cabe. Vazio quando as duas concluíram.
+   */
+  avisos: AvisoPreco[];
+}
+
+/** A variante nasce aqui, junto do texto — não é recalculada em quem consome. */
+export interface AvisoPreco {
+  texto: string;
+  variante: 'alerta' | 'erro';
 }
 
 /**
@@ -214,6 +225,17 @@ export const TEXTO_LEITURA_CASCATA: Record<EstadoContagem, string | null> = {
 };
 
 /**
+ * Um texto vira aviso com a variante certa: `erro` para leitura que falhou de
+ * fato, `alerta` para leitura ainda em curso. `null` (leitura concluída) não
+ * vira aviso nenhum.
+ */
+function avisoDaLeitura(estado: EstadoContagem, textos: Record<EstadoContagem, string | null>): AvisoPreco | null {
+  const texto = textos[estado];
+  if (texto === null) return null;
+  return { texto, variante: estado === 'falhou' ? 'erro' : 'alerta' };
+}
+
+/**
  * O que a tela pode afirmar e quais controles pode oferecer.
  *
  * **Nenhum botão de escrita antes de a leitura concluir**, e não por
@@ -229,9 +251,9 @@ export function controlesDePreco(
   perm: { podeCriar: boolean; ehAdmin: boolean },
 ): ControlesDePreco {
   const avisos = [
-    TEXTO_LEITURA_PRECO[leituras.dados],
-    TEXTO_LEITURA_CASCATA[leituras.contexto],
-  ].filter((t): t is string => t !== null);
+    avisoDaLeitura(leituras.dados, TEXTO_LEITURA_PRECO),
+    avisoDaLeitura(leituras.contexto, TEXTO_LEITURA_CASCATA),
+  ].filter((a): a is AvisoPreco => a !== null);
 
   const dadosLidos = leituras.dados === 'concluida';
   const podeCriar = Boolean(perm?.podeCriar) && dadosLidos;
