@@ -7,6 +7,8 @@ tipo:
 # Leitura do Núcleo
 
 > O reg360 lê muito do Núcleo e escreve quase nada nele. Três restrições da plataforma decidem como essa leitura é feita, e nenhuma delas é evidente pelo código de tela.
+>
+> **Reconferidas em 2026-09-02 contra o `@urbiverso/sdk` 52.0.0** — o bundle publicado, não o `main` do monorepo. As quatro continuam valendo: `HelperNucleoApp` expõe exatamente `batch`, `chamarSubrecurso`, `atualizar` e `buscarPorChave`; não há rota de pessoa → imóveis; a listagem de pessoas não expande contatos; e a allowlist de filtros segue por entidade (`glebas`, por exemplo, só filtra por `matricula_id`). Refaça a conferência a cada nível novo de SDK — um contorno que perdeu a razão de existir vira dívida calada.
 
 ## As três restrições
 
