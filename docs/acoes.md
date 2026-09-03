@@ -116,6 +116,14 @@ O `alvo` do título muda: na aba do lote é o imóvel, aqui é o nome da pessoa.
 
 **Mutação recarrega a lista do recorte aberto**, não sempre a do imóvel. Recarregar por imóvel na tela do morador não daria lista vazia: daria as ações do *imóvel de mesmo número* do id da pessoa.
 
+## Lista vazia de ação: três causas, três frases
+
+As duas telas de ação — a aba do imóvel e a seção da pessoa — terminam numa afirmação: *"Nenhuma ação neste imóvel"*, *"Nenhuma ação com esta pessoa"*. Ambas eram ditas também quando `GET /acoes` falhava: `carregandoAcoes` cobria a janela do carregamento, voltava a `false` no `catch`, e a lista vazia produzia a mesma frase de um imóvel que realmente não tem ação.
+
+Hoje as duas passam por `estadoDaLista` (`comum/estado-lista.ts`), com os três estados. A submensagem da falha diz o que a tela **não** sabe — sem ela, *"não foi possível carregar"* sozinho ainda deixa o leitor concluir que provavelmente não havia nada.
+
+Vale notar o que **não** mudou: o badge de ação em destaque no cabeçalho continua derivando de `this.acoes`, e some quando a lista está vazia. Isso é correto aqui e não é o caso do badge de transação — a diferença é que a carga de ações roda na mesma view, e a falha dela já aparece na aba logo abaixo, com frase própria.
+
 ## O que ainda não existe
 
 **Criar ação a partir da pessoa.** O backend aceita — `POST /acoes` exige ao menos um imóvel **ou** uma pessoa —, mas a tela do morador só lista. Registrar continua sendo pela aba Ações do imóvel.

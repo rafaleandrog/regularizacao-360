@@ -20,6 +20,8 @@ Por isso `_faseDe` devolve `null` enquanto `regularizacaoLida` for falso, e o ba
 
 **O filtro por fase acompanha:** com a carga pendente, ele não corta. Filtrar sobre dado não lido devolveria lista vazia com a mensagem "nenhum parcelamento com esse filtro" — outra afirmação sem base.
 
+**A própria lista de Parcelamentos tinha o defeito gêmeo, um nível abaixo.** O parágrafo acima cobre `regularizacaoLida` — o mapa de fase; mas a lista em si (a que aparece quando `filtrados.length === 0`) ainda dizia "Nenhum parcelamento" / "Nenhum parcelamento com esse filtro" também quando o `_carregar()` da home **falhava**, sem checar `cargaFalhou`. Era o mesmo defeito das outras seis listas do app (ver [README.md](README) § "Nenhum X" é afirmação), só que nela ninguém tinha reparado na primeira leva — a revisão do PR achou depois. Agora ela passa por `estadoDaLista` (`comum/estado-lista.ts`) como as demais, e a mensagem de falha vem separada da de "zero resultados de verdade".
+
 ## Por que no app, e não no Núcleo
 
 O Núcleo tem `data_registro`, `area` e `regularizacao` (booleano) no parcelamento, e deriva daí um `status` de três valores: `registrado`, `irregular`, `nao_registrado`. É o fato **registral** — o cartório.

@@ -23,6 +23,7 @@ import { soData, hoje, statusVigencia, type StatusVigencia } from '../comum/casc
 import {
   lerQuitacao, estadoDaQuitacao, TEXTO_QUITACAO, podeAlternarQuitacao,
 } from '../comum/quitacao.js';
+import { estadoDaLista, numeroLido, TEXTO_AUSENCIA, sufixoNumerosAntigos, badgeOuAvisoDeFalha } from '../comum/estado-lista.js';
 import { ABAS_TOPO } from '../comum/navegacao.js';
 import { paiDaUnidade, avisoDeHeranca } from '../comum/unidade-cadeia.js';
 import {
@@ -269,6 +270,27 @@ export class AppReg360 extends LitElement {
   @state() private leituraPropostas: EstadoContagem = 'correndo';
   /** Idem para o cache de matrículas, que é por sessão e não por imóvel. */
   @state() private leituraMatriculas: EstadoContagem = 'correndo';
+  /**
+   * Idem para as listas cujo vazio é uma frase.
+   *
+   * Cada uma delas termina numa afirmação sobre o mundo — "Nenhuma ação neste
+   * imóvel", "Nenhum lote cadastrado nesta instância", "0 pessoa(s) físicas no
+   * Núcleo". Sem a marca, a lista vazia por falha é indistinguível da lista
+   * vazia por não haver nada, e a frase sai igual nos dois casos.
+   */
+  @state() private leituraAcoes: EstadoContagem = 'correndo';
+  @state() private leituraAcoesDaPessoa: EstadoContagem = 'correndo';
+  @state() private leituraTransacoes: EstadoContagem = 'correndo';
+  @state() private leituraMoradores: EstadoContagem = 'correndo';
+  @state() private leituraLotesGlobais: EstadoContagem = 'correndo';
+  /**
+   * Leitura própria da tabela de lotes do Parcelamento — não `this.carregando`.
+   * A mesma tela liga `carregando` durante `_salvarRegularizacao`, `_acaoPreco`,
+   * `_acaoDeAcao` e o form de propostas, todos depois de os lotes já terem sido
+   * lidos. Derivar da flag global trocava "Nenhum lote com esse filtro" por
+   * "Carregando…" enquanto um modal salvava — os lotes já estavam ali.
+   */
+  @state() private leituraLotesDoParcelamento: EstadoContagem = 'correndo';
   /** Modal de preço: qual campo, valor e se é correção de contrato. */
   @state() private formPreco: { campo: 'estatico' | 'manual' | 'corrigir'; valor: string } | null = null;
   @state() private formRegAberto = false;
@@ -446,11 +468,12 @@ export class AppReg360 extends LitElement {
     // Sem o reset, a contagem lida no setor anterior sobreviveria a uma carga
     // que falha, e a tela afirmaria sobre uma base que ela não leu.
     this.totalParcelamentosInstancia = null;
-    // O alvo mudou, e `detalhe`, `propostas` e o contexto do imóvel ainda são
-    // do ANTERIOR. Sem zerar aqui — sincronamente, antes do primeiro `await` —
-    // a janela entre o clique e a resposta renderiza o cabeçalho, os KPIs e a
-    // lista de propostas de um objeto que já saiu da tela; e no caminho de
-    // falha eles ficam lá para sempre, sob o nome do objeto novo.
+    // O alvo mudou, e `detalhe`, `propostas`, a tabela de lotes do parcelamento
+    // e o contexto do imóvel ainda são do ANTERIOR. Sem zerar aqui —
+    // sincronamente, antes do primeiro `await` — a janela entre o clique e a
+    // resposta renderiza o cabeçalho, os KPIs, a lista de propostas e a tabela
+    // de lotes de um objeto que já saiu da tela; e no caminho de falha eles
+    // ficam lá para sempre, sob o nome do objeto novo.
     this.detalhe = null;
     this.propostas = [];
     this.vigente = null;
@@ -459,9 +482,17 @@ export class AppReg360 extends LitElement {
     this.unidadesDoLote = [];
     this.avisoHerancaUnidade = null;
     this.loteDaUnidade = null;
+    this.lotes = [];
     this.leituraPropostas = 'correndo';
     this.leituraDadosDoImovel = 'correndo';
     this.leituraContextoDoImovel = 'correndo';
+    // Faltava aqui: só o `case 'parcelamento'` reatribuía, depois de
+    // `reg360Api.parcelamento` resolver. Se essa chamada lança, o catch
+    // externo nunca chegava a tocar este estado, e ele ficava com o valor da
+    // visita ANTERIOR ('concluida' com `this.lotes = []` acima, que afirma
+    // "Nenhum lote" sobre uma leitura que nem começou; ou 'correndo' na
+    // primeira navegação, que trava em "Carregando…" para sempre).
+    this.leituraLotesDoParcelamento = 'correndo';
     this.carregando = true;
     try {
       switch (this.rota.view) {
@@ -521,7 +552,20 @@ export class AppReg360 extends LitElement {
             this.detalhe = await reg360Api.parcelamento(this.rota.id);
             // `parcelamento_id` É filtro válido em GET /lotes (ao contrário de
             // `unidades`, que nem tem essa coluna).
-            this.lotes = await reg360Api.lotes({ parcelamento_id: this.rota.id });
+            // `leituraLotesDoParcelamento` já foi posto em 'correndo' no reset
+            // síncrono do topo de `_carregar()` — não `this.carregando`. A
+            // mesma tela liga `carregando` de novo depois, em
+            // `_salvarRegularizacao`, `_acaoPreco`, `_acaoDeAcao` e no form de
+            // propostas; derivar da flag global fazia a tabela voltar a
+            // "Carregando…" com os lotes já lidos, só porque um modal estava
+            // salvando.
+            try {
+              this.lotes = await reg360Api.lotes({ parcelamento_id: this.rota.id });
+              this.leituraLotesDoParcelamento = 'concluida';
+            } catch (e) {
+              this.leituraLotesDoParcelamento = 'falhou';
+              throw e;
+            }
             await this._carregarPropostas('parcelamento', this.rota.id);
             void this._carregarMatriculas();
             void this._carregarPessoasDaPagina();
@@ -577,6 +621,14 @@ export class AppReg360 extends LitElement {
       // cards — cada um contando sobre uma lista vazia. Sem esta marca, eles
       // diriam "0 parcelamentos" com só um banner genérico a contradizê-los.
       this.cargaFalhou = true;
+      // Só sobra 'correndo' aqui quando `reg360Api.parcelamento` lançou ANTES
+      // do try/catch interno de `leituraLotesDoParcelamento` rodar — esse
+      // try/catch já marca 'falhou' sozinho e o `throw e` dele já chega aqui
+      // com o estado certo. Sem este ajuste, a tabela ficava em
+      // "Carregando…" para sempre depois de a busca do parcelamento falhar.
+      if (this.rota.view === 'parcelamento' && this.leituraLotesDoParcelamento === 'correndo') {
+        this.leituraLotesDoParcelamento = 'falhou';
+      }
       this._registrarFalha(e, 'Falha ao carregar dados');
     } finally {
       this.carregando = false;
@@ -888,6 +940,7 @@ export class AppReg360 extends LitElement {
    */
   private async _carregarMoradores(pagina: number) {
     this.carregando = true;
+    this.leituraMoradores = 'correndo';
     try {
       const r: any = await reg360Api.pessoas(
         { busca: this.buscaMorador.trim() || undefined, tipo: 'fisica' },
@@ -897,8 +950,15 @@ export class AppReg360 extends LitElement {
       this.moradoresPagina = Number(r?.pagina) || pagina;
       this.moradoresPaginas = Number(r?.paginas) || 1;
       this.moradoresTotal = Number(r?.total) || this.moradores.length;
+      this.leituraMoradores = 'concluida';
       void this._carregarContatos(this.moradores);
     } catch (e: any) {
+      // Nada é resetado de propósito — a página anterior continua na tela em
+      // vez de sumir. O que muda é que ela para de se apresentar como o
+      // resultado da busca nova: sem esta marca, `moradoresTotal` de uma
+      // primeira carga que falhou é `0`, e a tela afirmava "0 pessoa(s)
+      // física(s) no Núcleo" — número sobre a base inteira, não sobre a página.
+      this.leituraMoradores = 'falhou';
       this._registrarFalha(e, 'Falha ao carregar moradores');
     } finally {
       this.carregando = false;
@@ -1009,15 +1069,21 @@ export class AppReg360 extends LitElement {
    */
   private async _carregarAcoes() {
     this.acoes = [];
-    if (!this.rota.id) return;
+    if (!this.rota.id) { this.leituraAcoes = 'concluida'; return; }
     this.carregandoAcoes = true;
+    this.leituraAcoes = 'correndo';
     try {
       const r = await reg360Api.listarAcoes({
         imovel_id: this.rota.id,
         imovel_tipo: this.rota.view,
       });
       this.acoes = r?.dados || [];
+      this.leituraAcoes = 'concluida';
     } catch (e: any) {
+      // `carregandoAcoes` cobria só a janela. No catch ele volta a `false` e a
+      // lista fica vazia — e a aba passava a afirmar "Nenhuma ação neste
+      // imóvel", que é o oposto do que se sabe.
+      this.leituraAcoes = 'falhou';
       this._registrarFalha(e, 'Falha ao carregar as ações');
     } finally {
       this.carregandoAcoes = false;
@@ -1034,12 +1100,15 @@ export class AppReg360 extends LitElement {
    */
   private async _carregarAcoesDaPessoa() {
     this.acoesDaPessoa = [];
-    if (!this.rota.id) return;
+    if (!this.rota.id) { this.leituraAcoesDaPessoa = 'concluida'; return; }
     this.carregandoAcoesDaPessoa = true;
+    this.leituraAcoesDaPessoa = 'correndo';
     try {
       const r = await reg360Api.listarAcoes({ pessoa_id: this.rota.id });
       this.acoesDaPessoa = r?.dados || [];
+      this.leituraAcoesDaPessoa = 'concluida';
     } catch (e: any) {
+      this.leituraAcoesDaPessoa = 'falhou';
       this._registrarFalha(e, 'Falha ao carregar as ações desta pessoa');
     } finally {
       this.carregandoAcoesDaPessoa = false;
@@ -1047,18 +1116,27 @@ export class AppReg360 extends LitElement {
   }
 
   /**
-   * Transações do imóvel, pelo adaptador. Ele devolve lista vazia quando a
-   * entidade não existe, então não há caminho de erro a tratar aqui.
+   * Transações do imóvel, pelo adaptador.
+   *
+   * O adaptador devolve lista vazia quando a integração está **desligada** —
+   * e isso a aba já distingue. O que ele NÃO absorve é falha de rede:
+   * `garantirEstado()` consulta `/transacoes-estado` e `transacoesDoImovel`
+   * bate na API quando a integração estiver ligada (issue #80), então há
+   * caminho de erro sim. Com a integração ligada e a rede caindo, sem a marca
+   * a aba diria "Nenhuma transação neste imóvel" e as três datas sairiam `—`.
    */
   private async _carregarTransacoes() {
     this.transacoes = [];
-    if (!this.rota.id) return;
+    if (!this.rota.id) { this.leituraTransacoes = 'concluida'; return; }
+    this.leituraTransacoes = 'correndo';
     try {
       // O estado vem do servidor, não da constante compilada: ligar a
       // integração no backend precisa valer para bundle já em cache.
       await garantirEstado();
       this.transacoes = await transacoesDoImovel(this.rota.view, this.rota.id);
+      this.leituraTransacoes = 'concluida';
     } catch (e: any) {
+      this.leituraTransacoes = 'falhou';
       this._registrarFalha(e, 'Falha ao carregar as transações');
     }
   }
@@ -1453,6 +1531,20 @@ export class AppReg360 extends LitElement {
       for (const [id] of resultados) falhas.delete(id); // retry que deu certo limpa a marca
       for (const id of falhados) falhas.add(id);
       this.lotesComFalhaDePessoas = falhas;
+    } catch (e: any) {
+      // O `catch` por item (dentro do `mapaComLimite`) cobre o lote que falha
+      // sozinho; este cobre a falha CATASTRÓFICA — o próprio `mapaComLimite`
+      // rejeitando, ou a montagem do alvo — não item por item, porque aquele
+      // já não rejeita. Marcar todo `alvo` como falhado aqui não sobrescreve
+      // sucesso parcial algum: `pessoasPorLote` só é escrito DEPOIS de
+      // `resultados` resolver, e se caiu aqui é porque não resolveu. Sem este
+      // `catch` a promessa é disparada com `void` e a rejeição não é tratada:
+      // os lotes ficam sem ocupante e sem marca de falha — de novo `—`, de
+      // novo igual a "sem ocupante".
+      const falhas = new Set(this.lotesComFalhaDePessoas);
+      for (const l of alvo) falhas.add(Number(l.id));
+      this.lotesComFalhaDePessoas = falhas;
+      this._registrarFalha(e, 'Falha ao carregar os ocupantes da página');
     } finally {
       this.carregandoPessoas = false;
     }
@@ -1960,11 +2052,21 @@ export class AppReg360 extends LitElement {
       ${this.carregando && this.parcelamentos.length === 0
         ? html`<urbi-loading></urbi-loading>`
         : filtrados.length === 0
-          ? html`<urbi-estado-vazio
-              icone="fa-solid fa-map"
-              mensagem=${this.parcelamentos.length === 0 ? 'Nenhum parcelamento' : 'Nenhum parcelamento com esse filtro'}
-              submensagem=${this.parcelamentos.length === 0 ? '' : 'Ajuste a busca ou troque o setor.'}
-            ></urbi-estado-vazio>`
+          ? (() => {
+              // Mesmo defeito das outras seis listas: o `catch` de `_carregar`
+              // marca `cargaFalhou` sem tocar `this.parcelamentos`, e antes este
+              // render nunca consultava — "Nenhum parcelamento" saía igual para
+              // "não há nenhum" e para "a leitura falhou".
+              const e = estadoDaLista(estadoDaContagem({ correndo: this.carregando, falhou: this.cargaFalhou }), {
+                vazio: this.parcelamentos.length === 0 ? 'Nenhum parcelamento' : 'Nenhum parcelamento com esse filtro',
+                falhou: 'Não foi possível carregar os parcelamentos',
+              });
+              return html`<urbi-estado-vazio
+                icone="fa-solid fa-map"
+                mensagem=${e.mensagem}
+                submensagem=${e.podeAfirmarVazio && this.parcelamentos.length > 0 ? 'Ajuste a busca ou troque o setor.' : e.submensagem}
+              ></urbi-estado-vazio>`;
+            })()
           : html`
             <urbi-grid min="260px" gap="12px">
               ${filtrados.map((p) => {
@@ -2021,6 +2123,7 @@ export class AppReg360 extends LitElement {
    */
   private async _carregarLotesGlobais(pagina: number) {
     this.carregando = true;
+    this.leituraLotesGlobais = 'correndo';
     try {
       const resp = await reg360Api.lotesPagina(
         { busca: this.buscaLotesGlobais },
@@ -2030,7 +2133,13 @@ export class AppReg360 extends LitElement {
       this.lotesGlobais = resp.dados ?? [];
       this.totalLotesGlobais = Number(resp.total ?? this.lotesGlobais.length);
       this.paginaLotesGlobais = pagina;
+      this.leituraLotesGlobais = 'concluida';
     } catch (e: any) {
+      // A lista anterior fica na tela de propósito — apagá-la perderia o que
+      // já tinha sido lido. Mas ela é de OUTRO termo de busca e de OUTRA
+      // página, e sem esta marca a tabela a apresentava como o resultado da
+      // busca nova, com a paginação do total velho por baixo.
+      this.leituraLotesGlobais = 'falhou';
       this._registrarFalha(e, 'Falha ao carregar lotes');
     } finally {
       this.carregando = false;
@@ -2047,6 +2156,16 @@ export class AppReg360 extends LitElement {
   private _renderListaLotes(): TemplateResult {
     const paginas = Math.max(1, Math.ceil(this.totalLotesGlobais / LOTES_GLOBAIS_POR_PAGINA));
     return html`
+      ${this.leituraLotesGlobais === 'falhou' && this.lotesGlobais.length > 0
+        // O pior caso desta tela não é a lista vazia — é a lista CHEIA: os
+        // resultados da busca anterior continuam ali, sob o termo novo, com
+        // cara de resposta. Apagá-los perderia o que já foi lido; o que não
+        // pode é deixá-los se passarem pelo resultado que não veio.
+        ? html`<urbi-banner variante="erro">
+            A busca não foi lida. A tabela abaixo é o <strong>resultado anterior</strong>,
+            não o do termo que está no campo.
+          </urbi-banner>`
+        : nothing}
       <urbi-input
         label="Buscar por número, quadra, conjunto ou rua"
         .valor=${this.buscaLotesGlobais}
@@ -2055,9 +2174,12 @@ export class AppReg360 extends LitElement {
       <urbi-tabela
         clicavel
         ?carregando=${this.carregando}
-        mensagemVazio=${this.buscaLotesGlobais
-          ? `Nenhum lote encontrado para "${this.buscaLotesGlobais}"`
-          : 'Nenhum lote cadastrado nesta instância'}
+        mensagemVazio=${estadoDaLista(this.leituraLotesGlobais, {
+          vazio: this.buscaLotesGlobais
+            ? `Nenhum lote encontrado para "${this.buscaLotesGlobais}"`
+            : 'Nenhum lote cadastrado nesta instância',
+          falhou: 'Não foi possível carregar os lotes',
+        }).mensagem}
         .colunas=${[
           { id: 'ident', label: 'Identificação', valor: (l: any) => nomeDe(l) },
           { id: 'endereco', label: 'Endereço', valor: (l: any) => String(l.rua ?? '—') },
@@ -2071,7 +2193,7 @@ export class AppReg360 extends LitElement {
         ? html`<div class="barra-acoes">
             <urbi-botao variante="fantasma" pequeno ?desabilitado=${this.paginaLotesGlobais <= 1}
               @click=${() => void this._carregarLotesGlobais(this.paginaLotesGlobais - 1)}>Anterior</urbi-botao>
-            <span class="prop-meta">Página ${this.paginaLotesGlobais} de ${paginas} · ${this.totalLotesGlobais} lotes</span>
+            <span class="prop-meta">Página ${this.paginaLotesGlobais} de ${paginas} · ${this.totalLotesGlobais} lotes${sufixoNumerosAntigos(this.leituraLotesGlobais)}</span>
             <urbi-botao variante="fantasma" pequeno ?desabilitado=${this.paginaLotesGlobais >= paginas}
               @click=${() => void this._carregarLotesGlobais(this.paginaLotesGlobais + 1)}>Próxima</urbi-botao>
           </div>`
@@ -2263,8 +2385,26 @@ export class AppReg360 extends LitElement {
 
       <urbi-tabela
         clicavel
-        ?carregando=${this.carregando && this.lotes.length === 0}
-        mensagemVazio=${this.lotes.length === 0 ? 'Nenhum lote neste parcelamento' : 'Nenhum lote com esse filtro'}
+        ?carregando=${
+          // Estado PRÓPRIO — não this.carregando. A mensagem de vazio abaixo já
+          // usa leituraLotesDoParcelamento; o spinner usava a flag global, que
+          // liga de novo em _salvarRegularizacao, _acaoPreco etc. e fazia esta
+          // tabela voltar a girar com os lotes já lidos, só por um modal
+          // salvando em paralelo.
+          this.leituraLotesDoParcelamento === 'correndo'
+        }
+        mensagemVazio=${estadoDaLista(this.leituraLotesDoParcelamento, {
+          vazio: this.lotes.length === 0
+            ? 'Nenhum lote neste parcelamento'
+            // No modo morador o filtro roda sobre `pessoasPorLote`, e lote que
+            // falhou entra ali como lista vazia — some do resultado sem dizer.
+            // A frase e o rodapé se contradiziam: um afirmava "nenhum", o outro
+            // admitia que N lotes não responderam.
+            : this.modoBusca === 'morador' && this.lotesComFalhaDePessoas.size > 0
+              ? `Nenhum lote com esse filtro entre os que responderam — ${this.lotesComFalhaDePessoas.size} não foram lidos`
+              : 'Nenhum lote com esse filtro',
+          falhou: 'Não foi possível carregar os lotes deste parcelamento',
+        }).mensagem}
         .colunas=${[
           { id: 'endereco', label: 'Endereço', valor: (l: any) => nomeDe(l) },
           { id: 'matricula', label: 'Matrícula', valor: (l: any) => {
@@ -2355,7 +2495,18 @@ export class AppReg360 extends LitElement {
           return html`<urbi-badge cor=${b.cor}>${b.rotulo}</urbi-badge>`;
         })}
         ${(() => {
-          const b = badgeTransacao(this.transacoes);
+          // Badge ausente afirma, em silêncio, que não há transação neste
+          // imóvel. Com a leitura falhada isso é afirmação sobre o que não foi
+          // lido — o mesmo defeito que `tiposDesconhecidos` cobriu no PR #84,
+          // por outro caminho. A prioridade do aviso sobre o badge normal mora
+          // em `badgeOuAvisoDeFalha` — não neste `if` — porque reordenar um
+          // `if` escrito à mão perde essa prioridade sem quebrar teste nenhum.
+          const b = badgeOuAvisoDeFalha(
+            transacaoDisponivel(),
+            this.leituraTransacoes,
+            badgeTransacao(this.transacoes),
+            { cor: 'erro', rotulo: 'Transações não lidas' },
+          );
           return b ? html`<urbi-badge cor=${b.cor}>${b.rotulo}</urbi-badge>` : nothing;
         })()}
         ${(() => {
@@ -2447,8 +2598,16 @@ export class AppReg360 extends LitElement {
       <urbi-abas
         .abas=${[
           { id: 'propostas', label: 'Propostas Vigentes' },
+          // O dot marca "tem coisa a ver aqui": integração desligada, leitura
+          // que falhou, OU leitura ainda correndo — este último é de propósito
+          // e não folga: sem ele, o dot ficaria apagado (dizendo "nada a ver")
+          // durante toda a janela entre abrir a aba e `_carregarTransacoes`
+          // responder, inclusive antes de `garantirEstado()` resolver se a
+          // integração está ligada. `transacaoDisponivel()` no primeiro render
+          // ainda é a constante compilada — o valor do servidor chega com
+          // `garantirEstado()`, e até lá o dot podia dizer o contrário do real.
           { id: 'transacoes', label: 'Transações',
-            ...(transacaoDisponivel() ? {} : { dot: 'aviso' }) },
+            ...(!transacaoDisponivel() || this.leituraTransacoes !== 'concluida' ? { dot: 'aviso' } : {}) },
           { id: 'acoes', label: 'Ações', ...(this._acoesEmDestaque.length > 0 ? { dot: 'aviso' } : {}) },
         ]}
         ativa=${this.abaDetalhe}
@@ -2476,7 +2635,15 @@ export class AppReg360 extends LitElement {
     return html`
       <h2>Moradores</h2>
       <p class="prop-meta">
-        ${this.moradoresTotal} pessoa(s) física(s) no Núcleo.
+        ${(() => {
+          // Afirmação sobre a base INTEIRA, não sobre a página. Numa primeira
+          // carga que falha, `moradoresTotal` é 0 e a frase virava "0 pessoa(s)
+          // física(s) no Núcleo" — o número mais caro de errar desta tela.
+          const n = numeroLido(this.leituraMoradores, this.moradoresTotal);
+          return n === null
+            ? html`${TEXTO_CARGA[this.leituraMoradores] ?? ''} — o total de pessoas físicas não foi lido.`
+            : html`${n} pessoa(s) física(s) no Núcleo.`;
+        })()}
         A busca é do servidor, sobre nome e CPF — e, como ela é <code>ILIKE</code>,
         <strong>não cruza acento</strong>: procure <em>José</em>, não <em>jose</em>.
       </p>
@@ -2543,9 +2710,12 @@ export class AppReg360 extends LitElement {
       <urbi-tabela
         clicavel
         ?carregando=${this.carregando && this.moradores.length === 0}
-        mensagemVazio=${this.soIncompletos
-          ? 'Nenhum cadastro com falta comprovada nesta página'
-          : this.buscaMorador ? 'Nenhum morador com esse termo' : 'Nenhum morador'}
+        mensagemVazio=${estadoDaLista(this.leituraMoradores, {
+          vazio: this.soIncompletos
+            ? 'Nenhum cadastro com falta comprovada nesta página'
+            : this.buscaMorador ? 'Nenhum morador com esse termo' : 'Nenhum morador',
+          falhou: 'Não foi possível carregar os moradores',
+        }).mensagem}
         .colunas=${[
           { id: 'nome', label: 'Nome', valor: (p: any) => String(p.pf_nome ?? p.nome ?? nomeDe(p)) },
           { id: 'cpf', label: 'CPF', valor: (p: any) => String(p.cpf_formatado ?? p.pf_cpf ?? p.cpf ?? '—') },
@@ -2561,7 +2731,7 @@ export class AppReg360 extends LitElement {
         ? html`<div class="barra-acoes">
             <urbi-botao variante="fantasma" pequeno ?desabilitado=${this.moradoresPagina <= 1}
               @click=${() => this._carregarMoradores(this.moradoresPagina - 1)}>Anterior</urbi-botao>
-            <span class="prop-meta">Página ${this.moradoresPagina} de ${this.moradoresPaginas}</span>
+            <span class="prop-meta">Página ${this.moradoresPagina} de ${this.moradoresPaginas}${sufixoNumerosAntigos(this.leituraMoradores)}</span>
             <urbi-botao variante="fantasma" pequeno ?desabilitado=${this.moradoresPagina >= this.moradoresPaginas}
               @click=${() => this._carregarMoradores(this.moradoresPagina + 1)}>Próxima</urbi-botao>
           </div>`
@@ -2692,9 +2862,17 @@ export class AppReg360 extends LitElement {
       ${this.carregandoAcoesDaPessoa
         ? html`<urbi-loading></urbi-loading>`
         : this.acoesDaPessoa.length === 0
-          ? html`<urbi-estado-vazio icone="fa-solid fa-gavel"
-              mensagem="Nenhuma ação com esta pessoa"
-              submensagem="Ações são registradas a partir do lote, na aba Ações."></urbi-estado-vazio>`
+          ? (() => {
+              const e = estadoDaLista(this.leituraAcoesDaPessoa, {
+                vazio: 'Nenhuma ação com esta pessoa',
+                falhou: 'Não foi possível carregar as ações desta pessoa',
+              });
+              return html`<urbi-estado-vazio icone="fa-solid fa-gavel"
+                mensagem=${e.mensagem}
+                submensagem=${e.podeAfirmarVazio
+                  ? 'Ações são registradas a partir do lote, na aba Ações.'
+                  : e.submensagem}></urbi-estado-vazio>`;
+            })()
           : html`<urbi-stack>${this.acoesDaPessoa.map((a) => this._renderCardAcao(a, p))}</urbi-stack>`}
     `;
   }
@@ -2934,11 +3112,19 @@ export class AppReg360 extends LitElement {
       ${this.carregandoAcoes
         ? html`<urbi-loading></urbi-loading>`
         : lista.length === 0
-          ? html`<urbi-estado-vazio icone="fa-solid fa-gavel"
-              mensagem=${this.acoes.length === 0 ? 'Nenhuma ação neste imóvel' : 'Nenhuma ação com esse filtro'}
-              submensagem=${this.acoes.length === 0
-                ? 'Ação que existe só contra uma pessoa, sem imóvel, aparece na tela dela.'
-                : ''}></urbi-estado-vazio>`
+          ? (() => {
+              const e = estadoDaLista(this.leituraAcoes, {
+                vazio: this.acoes.length === 0 ? 'Nenhuma ação neste imóvel' : 'Nenhuma ação com esse filtro',
+                falhou: 'Não foi possível carregar as ações',
+              });
+              return html`<urbi-estado-vazio icone="fa-solid fa-gavel"
+                mensagem=${e.mensagem}
+                submensagem=${!e.podeAfirmarVazio
+                  ? e.submensagem
+                  : this.acoes.length === 0
+                    ? 'Ação que existe só contra uma pessoa, sem imóvel, aparece na tela dela.'
+                    : ''}></urbi-estado-vazio>`;
+            })()
           : html`<urbi-stack>${lista.map((a) => this._renderCardAcao(a, u))}</urbi-stack>`}
     `;
   }
@@ -3130,15 +3316,43 @@ export class AppReg360 extends LitElement {
       ${avisoCatalogo
         ? html`<urbi-banner variante="alerta">${avisoCatalogo}</urbi-banner>`
         : nothing}
+      ${transacaoDisponivel() && this.leituraTransacoes === 'falhou'
+        ? html`<urbi-banner variante="erro">
+            As transações deste imóvel não foram lidas — as datas abaixo e o badge de estágio
+            não refletem o que está gravado.
+          </urbi-banner>`
+        : nothing}
       <p class="secao-titulo">Datas de assinatura</p>
       <urbi-wrap>
         ${linhas.map((l) => html`
-          <urbi-kpi rotulo=${l.rotulo} .valor=${l.data ? soData(l.data) : '—'} formato="texto"></urbi-kpi>`)}
+          <urbi-kpi rotulo=${l.rotulo}
+            .valor=${l.data
+              ? soData(l.data)
+              // Indisponível conta como "leitura concluída, e o resultado é
+              // nada" — não há segunda-fonte que ainda possa responder. A
+              // distinção `…`/`—` em si mora em `comum/estado-lista.ts`,
+              // que cita `comum/referencias.ts` como o mesmo precedente.
+              : TEXTO_AUSENCIA[!transacaoDisponivel() ? 'concluida' : this.leituraTransacoes]}
+            formato="texto"></urbi-kpi>`)}
       </urbi-wrap>
       ${this.transacoes.length === 0
-        ? html`<urbi-estado-vazio icone="fa-solid fa-file-signature"
-            mensagem=${transacaoDisponivel() ? 'Nenhuma transação neste imóvel' : 'Integração de Transações não ligada'}
-            submensagem=${transacaoDisponivel() ? '' : 'A entidade existe no Núcleo; falta ligar a integração deste app. A tela já sabe montar — quando ligar, aparece aqui sem mudança de código.'}></urbi-estado-vazio>`
+        ? (() => {
+            // Três causas para a lista vazia, e a tela precisa das três:
+            // integração desligada (que ela já distinguia), leitura em curso, e
+            // leitura que falhou. A terceira só morde quando a #80 ligar o
+            // interruptor — e é por isso que ela entra agora, não depois.
+            if (!transacaoDisponivel()) {
+              return html`<urbi-estado-vazio icone="fa-solid fa-file-signature"
+                mensagem="Integração de Transações não ligada"
+                submensagem="A entidade existe no Núcleo; falta ligar a integração deste app. A tela já sabe montar — quando ligar, aparece aqui sem mudança de código."></urbi-estado-vazio>`;
+            }
+            const e = estadoDaLista(this.leituraTransacoes, {
+              vazio: 'Nenhuma transação neste imóvel',
+              falhou: 'Não foi possível carregar as transações',
+            });
+            return html`<urbi-estado-vazio icone="fa-solid fa-file-signature"
+              mensagem=${e.mensagem} submensagem=${e.submensagem}></urbi-estado-vazio>`;
+          })()
         : html`<urbi-tabela
             .colunas=${[
               { id: 'tipo', label: 'Tipo', valor: (t: any) => t.tipo },

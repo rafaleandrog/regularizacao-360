@@ -52,6 +52,12 @@ A lista de Parcelamentos filtra **no cliente**; a de Moradores, **no servidor**.
 
 O preço é o conhecido: o `busca` é `ILIKE`, então **não cruza acento** — quem digita `jose` não acha `José`. A tela avisa isso em vez de deixar o usuário concluir que a pessoa não existe.
 
+## O total é sobre a instância, e por isso não pode sair de uma leitura que falhou
+
+O cabeçalho da tela diz *"N pessoa(s) física(s) no Núcleo"* — afirmação sobre a **base inteira**, não sobre a página. Numa primeira carga que falhava, `moradoresTotal` ficava em `0` e a frase virava *"0 pessoa(s) física(s) no Núcleo"*: o número mais caro de errar desta tela, porque um zero desses sugere base vazia, não requisição perdida.
+
+`numeroLido` (`comum/estado-lista.ts`) devolve `null` — nunca `0` — enquanto a leitura não concluiu, e a tela troca o número por uma frase. A tabela segue a mesma regra por `estadoDaLista`, e a paginação, que **mantém** os números da leitura anterior de propósito (perdê-los seria pior), passa a dizer que são dela.
+
 ## O filtro de incompletos exclui os indeterminados
 
 O uso prático da coluna Situação é achar quem precisa de conserto — daí o chip **"Só cadastros incompletos"**. Ele filtra `incompleto`, e **não** `indeterminado`.
