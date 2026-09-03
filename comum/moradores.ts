@@ -173,3 +173,106 @@ export const TEXTO_OCUPANTES: Record<EstadoOcupantes, string | null> = {
   vazio: 'Nenhum morador vinculado.',
   com_ocupantes: null,
 };
+// ---------------------------------------------------------------------------
+// O índice reverso pessoa → imóveis: quatro estados, não a presença de um id
+// ---------------------------------------------------------------------------
+
+/**
+ * O que a tela de Moradores sabe sobre o índice de UM parcelamento.
+ *
+ * Antes havia um campo só — `parcelamentoIndexado: number | null` —, e `null`
+ * significava duas coisas: "o usuário não pediu nada" **e** "pediu, e a
+ * indexação falhou inteira". O `catch` zerava o campo, e a tela voltava ao
+ * banner de *"a coluna de imóveis está vazia de propósito"* — a escolha do
+ * usuário descartada em silêncio, com um texto que afirmava intenção onde
+ * houve falha.
+ *
+ * Por isso o estado carrega o **pedido** separado do **resultado**: `pedido` é
+ * o que o usuário escolheu no select; `indexado` é o que a leitura devolveu.
+ * Divergem durante a indexação e depois de uma falha, e é essa divergência que
+ * a tela precisa mostrar.
+ */
+export type EstadoIndice = 'nao_indexado' | 'indexando' | 'indexado' | 'falhou';
+
+export function estadoDoIndice(e: {
+  /** O parcelamento que o usuário escolheu, ou `null` se nenhum. */
+  pedido: number | null;
+  /** O parcelamento cujo índice está em memória, ou `null`. */
+  indexado: number | null;
+  indexando: boolean;
+  falhou: boolean;
+}): EstadoIndice {
+  // "Indexando" vence "falhou": um pedido novo depois de uma falha é informação
+  // mais nova que a falha anterior — mesma precedência de `estadoDaContagem`.
+  if (e?.indexando) return 'indexando';
+  if (e?.falhou) return 'falhou';
+  if (e?.pedido === null || e?.pedido === undefined) return 'nao_indexado';
+  return e.indexado === e.pedido ? 'indexado' : 'nao_indexado';
+}
+
+/**
+ * A célula "Imóveis" de uma pessoa, dado o estado do índice.
+ *
+ * `null` quando há lista a mostrar: aí quem fala são os badges. O resto é
+ * frase, e cada frase é uma afirmação distinta:
+ *
+ * - `—` com o índice não montado — "não sei", igual a `comum/referencias.ts`;
+ * - *"nenhum neste parcelamento"* só com o recorte **completo**. Com lotes que
+ *   não responderam, essa frase mentia por linha enquanto o banner acima
+ *   admitia o buraco — e ninguém lê o banner para conferir uma célula.
+ */
+export function textoImoveisDaPessoa(e: {
+  estado: EstadoIndice;
+  quantidade: number;
+  lotesQueFalharam: number;
+}): string | null {
+  if (e.estado === 'indexado' && Number(e.quantidade) > 0) return null;
+  if (e.estado === 'nao_indexado') return '—';
+  if (e.estado === 'indexando') return '…';
+  if (e.estado === 'falhou') return 'índice não montado';
+  // indexado, sem vínculo conhecido
+  return Number(e.lotesQueFalharam) > 0
+    ? `nenhum nos lotes lidos — ${e.lotesQueFalharam} não responderam`
+    : 'nenhum neste parcelamento';
+}
+
+// ---------------------------------------------------------------------------
+// Contatos: consultado, em voo ou falhou
+// ---------------------------------------------------------------------------
+
+/**
+ * Um contato que **falhou** e um que **ainda não chegou** eram o mesmo `…`.
+ * A situação da pessoa saía `indeterminado` nos dois casos — o que está certo
+ * —, mas a célula não dizia se valia esperar ou tentar de novo. É o mesmo
+ * limbo que a coluna Matrícula tinha antes do PR #91.
+ */
+export type EstadoContato = 'nao_consultado' | 'falhou' | 'consultado';
+
+export function estadoDoContato(e: { consultado: boolean; falhou: boolean }): EstadoContato {
+  if (e?.falhou) return 'falhou';
+  return e?.consultado ? 'consultado' : 'nao_consultado';
+}
+
+/**
+ * O filtro "Só cadastros incompletos" e o seu contador só podem afirmar
+ * depois de os contatos da página terem sido consultados.
+ *
+ * Antes, com os contatos ainda em voo, todo mundo era `indeterminado`, o
+ * filtro esvaziava a tabela, e a tela escrevia *"0 de 50 nesta página têm
+ * falta comprovada"* mais *"Nenhum cadastro com falta comprovada nesta
+ * página"* — duas afirmações feitas antes da pergunta.
+ */
+export interface ResumoDoFiltro {
+  /** A contagem "X de Y" pode ser dita? */
+  podeAfirmar: boolean;
+  /** Quantas pessoas da página ainda não têm contato consultado (nem falha). */
+  pendentes: number;
+}
+
+export function resumoDoFiltroIncompletos(e: {
+  /** Estado de contato de cada pessoa da página. */
+  estados: EstadoContato[];
+}): ResumoDoFiltro {
+  const pendentes = (e?.estados || []).filter((s) => s === 'nao_consultado').length;
+  return { podeAfirmar: pendentes === 0, pendentes };
+}

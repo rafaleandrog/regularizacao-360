@@ -58,7 +58,32 @@ O cabeçalho da tela diz *"N pessoa(s) física(s) no Núcleo"* — afirmação s
 
 `numeroLido` (`comum/estado-lista.ts`) devolve `null` — nunca `0` — enquanto a leitura não concluiu, e a tela troca o número por uma frase. A tabela segue a mesma regra por `estadoDaLista`, e a paginação, que **mantém** os números da leitura anterior de propósito (perdê-los seria pior), passa a dizer que são dela.
 
+## O índice tem quatro estados, e o pedido é separado do resultado
+
+O índice reverso pessoa → imóveis era descrito por um campo só — `parcelamentoIndexado: number | null` —, e `null` significava duas coisas: *"o usuário não pediu nada"* **e** *"pediu, e a indexação falhou inteira"*. O `catch` zerava o campo, o `urbi-select` voltava sozinho para *"— nenhum —"*, e o banner dizia que a coluna estava **"vazia de propósito"**: um texto de intenção, dito sobre uma falha, com a escolha do usuário descartada em silêncio.
+
+Agora há dois campos — o que o usuário **pediu** (`parcelamentoPedido`) e o que a leitura **devolveu** (`parcelamentoIndexado`) —, e `estadoDoIndice` (`comum/moradores.ts`) deriva quatro estados da diferença entre eles:
+
+| Estado | O banner | A célula "Imóveis" |
+|---|---|---|
+| `nao_indexado` | *"vazia de propósito"*, com o custo explicado | `—` |
+| `indexando` | *"Lendo os ocupantes de X, lote a lote…"* — e a coluna ainda não vale | `…` |
+| `indexado` | *"Imóveis preenchidos para X"*, com o aviso de recorte incompleto se houver lote que não respondeu | a lista, ou a frase de vazio |
+| `falhou` | **"Não foi possível indexar X"** — a coluna está vazia porque a leitura falhou, não por escolha | *"índice não montado"* |
+
+**A célula só diz "nenhum neste parcelamento" com o recorte completo.** Com lotes que não responderam, ela diz *"nenhum nos lotes lidos — N não responderam"* (`textoImoveisDaPessoa`). Antes o banner global admitia o buraco e cada linha afirmava "nenhum" mesmo assim — e ninguém lê o banner para conferir uma célula.
+
+**Trocar de parcelamento durante uma indexação não é mais descartado.** Era `if (this.indexando) return`, e o select ficava exibindo um parcelamento que não era o indexado. Agora cada pedido tem uma geração; o resultado de um pedido antigo que chegue depois é descartado — a escolha nova, nunca.
+
+**O detalhe do morador diz de qual parcelamento é o recorte.** *"Nenhum neste parcelamento"* ali, sem o banner da lista por perto, era afirmação solta.
+
+## Contato que falhou não é contato que ainda não chegou
+
+`_carregarContatos` consulta telefones e emails pessoa a pessoa, e uma pessoa cuja consulta falha fica **sem contato consultado** — a situação dela sai `indeterminado`, que está certo. O que faltava era a célula: `…` servia para "ainda não chegou" **e** para "não vai chegar", e nada dizia se valia esperar. Agora `pessoasComFalhaDeContato` marca a falha (`estadoDoContato`), e a célula mostra *"não carregou"* no lugar do `…` — o mesmo tratamento que a coluna Pessoas da tabela de lotes já dava.
+
 ## O filtro de incompletos exclui os indeterminados
+
+**E só conta depois de os contatos chegarem.** Com `_carregarContatos` ainda em voo, todo mundo é `indeterminado`, o filtro esvazia a tabela, e a tela escrevia *"0 de 50 nesta página têm falta comprovada"* mais *"Nenhum cadastro com falta comprovada nesta página"* — duas afirmações antes da pergunta. `resumoDoFiltroIncompletos` só libera a contagem quando não há contato pendente; contato que **falhou** não é pendência, porque não vai chegar, e esperar por ele travaria o contador para sempre.
 
 O uso prático da coluna Situação é achar quem precisa de conserto — daí o chip **"Só cadastros incompletos"**. Ele filtra `incompleto`, e **não** `indeterminado`.
 

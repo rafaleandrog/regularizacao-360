@@ -220,3 +220,114 @@ describe('estadoDosOcupantes — não consultado não é vazio', () => {
     assert.equal(nulos.length, 1, 'só com_ocupantes dispensa frase');
   });
 });
+
+// ---------------------------------------------------------------------------
+// O índice, os contatos e o filtro — rodada 5 da #88
+// ---------------------------------------------------------------------------
+
+import {
+  estadoDoIndice,
+  textoImoveisDaPessoa,
+  estadoDoContato,
+  resumoDoFiltroIncompletos,
+} from '../../comum/moradores.js';
+
+// ---------------------------------------------------------------------------
+// O índice reverso — quatro estados, pedido separado do resultado
+// ---------------------------------------------------------------------------
+
+describe('estadoDoIndice — falha na indexação não é "não pedi nada"', () => {
+  // O defeito real: `parcelamentoIndexado` voltava a `null` no `catch`, e a
+  // tela caía no banner de "vazia de propósito" — que é texto de intenção,
+  // dito sobre uma falha. A escolha do usuário sumia do select em silêncio.
+  test('pedido que falhou é falhou, não nao_indexado', () => {
+    assert.equal(estadoDoIndice({ pedido: 46, indexado: null, indexando: false, falhou: true }), 'falhou');
+    assert.notEqual(
+      estadoDoIndice({ pedido: 46, indexado: null, indexando: false, falhou: true }),
+      estadoDoIndice({ pedido: null, indexado: null, indexando: false, falhou: false }),
+    );
+  });
+
+  test('sem pedido é nao_indexado, mesmo que um índice velho esteja em memória', () => {
+    assert.equal(estadoDoIndice({ pedido: null, indexado: 12, indexando: false, falhou: false }), 'nao_indexado');
+  });
+
+  // Trocar o parcelamento no select durante uma indexação era descartado por
+  // `if (this.indexando) return`, e o select ficava mostrando um parcelamento
+  // que não era o indexado. Pedido ≠ indexado tem que ser visível.
+  test('pedido diferente do indexado não é indexado', () => {
+    assert.equal(estadoDoIndice({ pedido: 46, indexado: 12, indexando: false, falhou: false }), 'nao_indexado');
+    assert.equal(estadoDoIndice({ pedido: 46, indexado: 46, indexando: false, falhou: false }), 'indexado');
+  });
+
+  test('indexando vence falhou — pedido novo é informação mais nova', () => {
+    assert.equal(estadoDoIndice({ pedido: 46, indexado: null, indexando: true, falhou: true }), 'indexando');
+  });
+});
+
+describe('textoImoveisDaPessoa — "nenhum neste parcelamento" só com recorte completo', () => {
+  // A falha parcial avisava no banner global, mas a célula de cada pessoa
+  // continuava afirmando "nenhum neste parcelamento" — o mesmo "falha não é
+  // vazio", violado uma linha de cada vez.
+  test('com lotes que não responderam, a célula diz que o recorte está furado', () => {
+    const t = textoImoveisDaPessoa({ estado: 'indexado', quantidade: 0, lotesQueFalharam: 3 });
+    assert.notEqual(t, 'nenhum neste parcelamento');
+    assert.match(String(t), /3/);
+  });
+
+  test('só com o recorte completo a célula afirma "nenhum"', () => {
+    assert.equal(textoImoveisDaPessoa({ estado: 'indexado', quantidade: 0, lotesQueFalharam: 0 }), 'nenhum neste parcelamento');
+  });
+
+  test('com vínculo conhecido quem fala é a lista', () => {
+    assert.equal(textoImoveisDaPessoa({ estado: 'indexado', quantidade: 2, lotesQueFalharam: 5 }), null);
+  });
+
+  test('os quatro estados sem lista têm textos distintos entre si', () => {
+    const t = [
+      textoImoveisDaPessoa({ estado: 'nao_indexado', quantidade: 0, lotesQueFalharam: 0 }),
+      textoImoveisDaPessoa({ estado: 'indexando', quantidade: 0, lotesQueFalharam: 0 }),
+      textoImoveisDaPessoa({ estado: 'falhou', quantidade: 0, lotesQueFalharam: 0 }),
+      textoImoveisDaPessoa({ estado: 'indexado', quantidade: 0, lotesQueFalharam: 0 }),
+    ];
+    assert.equal(new Set(t).size, 4, 'dois estados com o mesmo texto apagam a distinção');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Contatos e o filtro de incompletos
+// ---------------------------------------------------------------------------
+
+describe('estadoDoContato — falha não é "ainda não chegou"', () => {
+  test('falha vence consultado', () => {
+    assert.equal(estadoDoContato({ consultado: true, falhou: true }), 'falhou');
+    assert.equal(estadoDoContato({ consultado: false, falhou: true }), 'falhou');
+  });
+  test('os três estados são distintos', () => {
+    assert.equal(estadoDoContato({ consultado: false, falhou: false }), 'nao_consultado');
+    assert.equal(estadoDoContato({ consultado: true, falhou: false }), 'consultado');
+  });
+});
+
+describe('resumoDoFiltroIncompletos — "X de Y têm falta comprovada" espera os contatos', () => {
+  // Com os contatos em voo todo mundo era `indeterminado`, o filtro esvaziava
+  // a tabela e a tela escrevia "0 de 50" antes de ter perguntado.
+  test('não afirma enquanto houver contato não consultado', () => {
+    const r = resumoDoFiltroIncompletos({ estados: ['consultado', 'nao_consultado', 'falhou'] });
+    assert.equal(r.podeAfirmar, false);
+    assert.equal(r.pendentes, 1);
+  });
+
+  // Falha não é pendência: quem falhou não vai chegar, e esperar por ela
+  // travaria o contador para sempre. Ela sai `indeterminado` e fica fora da
+  // conta de "falta comprovada" — que é o comportamento certo.
+  test('contato que falhou não segura o contador', () => {
+    const r = resumoDoFiltroIncompletos({ estados: ['consultado', 'falhou'] });
+    assert.equal(r.podeAfirmar, true);
+    assert.equal(r.pendentes, 0);
+  });
+
+  test('página vazia pode afirmar — não há o que esperar', () => {
+    assert.equal(resumoDoFiltroIncompletos({ estados: [] }).podeAfirmar, true);
+  });
+});

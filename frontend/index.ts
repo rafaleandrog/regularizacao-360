@@ -46,6 +46,7 @@ import {
   estadoDosOcupantes,
   TEXTO_OCUPANTES,
   type Situacao,
+  estadoDoIndice, textoImoveisDaPessoa, estadoDoContato, resumoDoFiltroIncompletos,
 } from '../comum/moradores.js';
 import {
   badgeAcao,
@@ -349,7 +350,26 @@ export class AppReg360 extends LitElement {
    */
   @state() private imoveisPorPessoa = new Map<number, Array<{ imovel: any; vinculo: any }>>();
   @state() private parcelamentoIndexado: number | null = null;
+  /**
+   * O que o usuário PEDIU no select, separado do que o índice TEM.
+   *
+   * Antes era um campo só, e `null` significava duas coisas: "não pedi nada" e
+   * "pedi, e a indexação falhou inteira" — o `catch` zerava o campo, o select
+   * voltava sozinho para "— nenhum —", e o banner dizia que a coluna estava
+   * "vazia de propósito". A escolha do usuário descartada em silêncio, com um
+   * texto de intenção dito sobre uma falha.
+   */
+  @state() private parcelamentoPedido: number | null = null;
+  @state() private indiceFalhou = false;
+  /** Cresce a cada pedido; resultado de pedido antigo é descartado, não a escolha nova. */
+  private geracaoIndice = 0;
   @state() private indexando = false;
+  /**
+   * Pessoa cuja consulta de contato FALHOU. Sem a marca, ela fica fora de
+   * `contatosPorPessoa` igual a quem ainda não foi consultada — o mesmo `…`
+   * para "não chegou" e "não vai chegar", e nada que diga se vale esperar.
+   */
+  @state() private pessoasComFalhaDeContato: ReadonlySet<number> = new Set();
   /** Formulário de cadastro de morador. `null` = fechado. */
   @state() private formMorador: Record<string, any> | null = null;
   /** Resultado do último cadastro, para a tela dizer o que aconteceu passo a passo. */
@@ -984,12 +1004,18 @@ export class AppReg360 extends LitElement {
       } catch {
         // Uma pessoa que falha não derruba a página. Ela fica sem contato
         // CONSULTADO, e a situação dela sai indeterminada — que é a verdade.
-        return null;
+        // A marca abaixo é o que distingue "falhou" de "ainda não chegou".
+        return { falhou: id } as const;
       }
     });
     const mapa = new Map(this.contatosPorPessoa);
-    for (const r of resultados) if (r) mapa.set(r[0], r[1]);
+    const falhas = new Set(this.pessoasComFalhaDeContato);
+    for (const r of resultados) {
+      if (Array.isArray(r)) { mapa.set(r[0], r[1]); falhas.delete(r[0]); }
+      else if (r) falhas.add(r.falhou);
+    }
     this.contatosPorPessoa = mapa;
+    this.pessoasComFalhaDeContato = falhas;
   }
 
   /**
@@ -1005,14 +1031,23 @@ export class AppReg360 extends LitElement {
    * usuário escolhe pagar o custo, a tela não o cobra por conta própria.
    */
   private async _indexarParcelamento(parcelamentoId: number | null) {
-    if (this.indexando) return;
+    // O pedido é registrado ANTES de qualquer coisa: é ele que o select exibe.
+    // Trocar de parcelamento no meio de uma indexação não é mais descartado —
+    // era `if (this.indexando) return`, e o select ficava mostrando um
+    // parcelamento que não era o indexado. Agora o pedido novo invalida o
+    // resultado do antigo pela geração, e a escolha do usuário nunca some.
+    this.parcelamentoPedido = parcelamentoId;
+    const geracao = ++this.geracaoIndice;
     if (parcelamentoId === null) {
       this.parcelamentoIndexado = null;
       this.imoveisPorPessoa = new Map();
       this.lotesQueFalharam = 0;
+      this.indiceFalhou = false;
+      this.indexando = false;
       return;
     }
     this.indexando = true;
+    this.indiceFalhou = false;
     try {
       const lotes = await reg360Api.lotes({ parcelamento_id: parcelamentoId });
       // Lote que falha NÃO vira lote sem ocupante. Engolir o erro como lista
@@ -1025,16 +1060,42 @@ export class AppReg360 extends LitElement {
           return { imovel: l, vinculos: [], falhou: true };
         }
       });
+      if (geracao !== this.geracaoIndice) return; // pedido mais novo já venceu
       this.lotesQueFalharam = pares.filter((r) => r.falhou).length;
       this.imoveisPorPessoa = indexarPorPessoa(pares.filter((r) => !r.falhou));
       this.parcelamentoIndexado = parcelamentoId;
     } catch (e: any) {
+      if (geracao !== this.geracaoIndice) return;
+      // Falha inteira: o índice em memória é de OUTRO parcelamento (ou de
+      // nenhum) e não pode passar por este. Zera o resultado, mantém o pedido
+      // — é a divergência entre os dois que a tela mostra como "falhou".
       this.parcelamentoIndexado = null;
+      this.imoveisPorPessoa = new Map();
       this.lotesQueFalharam = 0;
+      this.indiceFalhou = true;
       this._registrarFalha(e, 'Falha ao indexar o parcelamento');
     } finally {
-      this.indexando = false;
+      if (geracao === this.geracaoIndice) this.indexando = false;
     }
+  }
+
+  /** O estado do índice, da decisão pura — pedido e resultado separados. */
+  private get _estadoIndice() {
+    return estadoDoIndice({
+      pedido: this.parcelamentoPedido,
+      indexado: this.parcelamentoIndexado,
+      indexando: this.indexando,
+      falhou: this.indiceFalhou,
+    });
+  }
+
+  /** Estado de contato de uma pessoa — consultado, em voo, ou falhou. */
+  private _estadoContatoDe(p: any) {
+    const id = Number(p?.id);
+    return estadoDoContato({
+      consultado: this.contatosPorPessoa.has(id),
+      falhou: this.pessoasComFalhaDeContato.has(id),
+    });
   }
 
   /**
@@ -2630,7 +2691,9 @@ export class AppReg360 extends LitElement {
    * requisição por lote da instância inteira.
    */
   private _renderMoradores(): TemplateResult {
-    const indexado = this.parcelamentoIndexado !== null;
+    const ei = this._estadoIndice;
+    const indexado = ei === 'indexado';
+    const resumo = resumoDoFiltroIncompletos({ estados: this.moradores.map((p) => this._estadoContatoDe(p)) });
     const buscar = () => { this.moradoresPagina = 1; void this._carregarMoradores(1); };
     return html`
       <h2>Moradores</h2>
@@ -2662,8 +2725,17 @@ export class AppReg360 extends LitElement {
           ?carregando=${this.carregando} @click=${buscar}>Buscar</urbi-botao>
       </div>
 
-      <urbi-banner variante=${indexado ? 'info' : 'alerta'}>
-        ${indexado
+      <urbi-banner variante=${ei === 'falhou' ? 'erro' : indexado ? 'info' : 'alerta'}>
+        ${ei === 'falhou'
+          // Antes, este caso caía no texto de "vazia de propósito" — intenção
+          // dita sobre uma falha, com o select voltando sozinho a "nenhum".
+          ? html`<strong>Não foi possível indexar ${this._nomeParcelamento(this.parcelamentoPedido)}.</strong>
+              A coluna de imóveis está vazia porque a leitura falhou, não por escolha.
+              Escolha o parcelamento de novo para tentar outra vez.`
+          : ei === 'indexando'
+            ? html`Lendo os ocupantes de <strong>${this._nomeParcelamento(this.parcelamentoPedido)}</strong>, lote a lote…
+                A coluna de imóveis ainda não vale.`
+            : indexado
           ? html`Imóveis preenchidos para <strong>${this._nomeParcelamento(this.parcelamentoIndexado)}</strong>.
               Pessoa vinculada só a outro parcelamento continua sem imóvel nesta coluna — o índice
               cobre um recorte, e ausência aqui <strong>não</strong> quer dizer ausência de vínculo.
@@ -2682,12 +2754,11 @@ export class AppReg360 extends LitElement {
       <urbi-select label="Indexar os moradores de um parcelamento"
         .opcoes=${[{ valor: '', rotulo: '— nenhum —' },
           ...this.parcelamentos.map((p: any) => ({ valor: String(p.id), rotulo: nomeDe(p) }))]}
-        .valor=${this.parcelamentoIndexado === null ? '' : String(this.parcelamentoIndexado)}
+        .valor=${this.parcelamentoPedido === null ? '' : String(this.parcelamentoPedido)}
         @urbi:select-change=${(e: CustomEvent) => {
           const v = String(e.detail.valor ?? '');
           void this._indexarParcelamento(v ? Number(v) : null);
         }}></urbi-select>
-      ${this.indexando ? html`<p class="prop-meta">Lendo os ocupantes lote a lote…</p>` : nothing}
 
       <urbi-wrap>
         <urbi-chips-atalho
@@ -2700,11 +2771,18 @@ export class AppReg360 extends LitElement {
         ></urbi-chips-atalho>
       </urbi-wrap>
       ${this.soIncompletos
-        ? html`<p class="prop-meta">
-            ${this._moradoresVisiveis.length} de ${this.moradores.length} nesta página têm falta
-            <strong>comprovada</strong>. Quem está com situação indeterminada fica de fora: pode
-            estar certo, e mandar conferir o que talvez não esteja quebrado torna a lista inútil.
-          </p>`
+        ? resumo.podeAfirmar
+          ? html`<p class="prop-meta">
+              ${this._moradoresVisiveis.length} de ${this.moradores.length} nesta página têm falta
+              <strong>comprovada</strong>. Quem está com situação indeterminada fica de fora: pode
+              estar certo, e mandar conferir o que talvez não esteja quebrado torna a lista inútil.
+            </p>`
+          // "X de Y" com os contatos em voo era "0 de 50" — afirmação antes da
+          // pergunta. Enquanto houver contato não consultado, a conta não vale.
+          : html`<p class="prop-meta">
+              Consultando os contatos de ${resumo.pendentes} pessoa(s) desta página — a contagem
+              de faltas comprovadas ainda não vale.
+            </p>`
         : nothing}
 
       <urbi-tabela
@@ -2712,7 +2790,9 @@ export class AppReg360 extends LitElement {
         ?carregando=${this.carregando && this.moradores.length === 0}
         mensagemVazio=${estadoDaLista(this.leituraMoradores, {
           vazio: this.soIncompletos
-            ? 'Nenhum cadastro com falta comprovada nesta página'
+            ? (resumo.podeAfirmar
+                ? 'Nenhum cadastro com falta comprovada nesta página'
+                : 'Consultando os contatos — o filtro ainda não vale')
             : this.buscaMorador ? 'Nenhum morador com esse termo' : 'Nenhum morador',
           falhou: 'Não foi possível carregar os moradores',
         }).mensagem}
@@ -2763,23 +2843,30 @@ export class AppReg360 extends LitElement {
    * de relance QUAL contato falta. `…` enquanto o sub-recurso não voltou: não
    * é `—`, porque ainda não se sabe.
    */
+  /** `…` é "não chegou"; a marca é "não vai chegar" — e são coisas diferentes. */
+  private _renderContatoNaoLido(p: any): TemplateResult {
+    return this._estadoContatoDe(p) === 'falhou'
+      ? html`<urbi-badge cor="alerta">não carregou</urbi-badge>`
+      : html`<span class="prop-meta">…</span>`;
+  }
+
   private _renderTelefones(p: any): TemplateResult {
     const c = this.contatosPorPessoa.get(Number(p?.id));
-    if (!c) return html`<span class="prop-meta">…</span>`;
+    if (!c) return this._renderContatoNaoLido(p);
     const lista = (c.telefones || []).map((t: any) => String(t.telefone_formatado ?? t.telefone));
     return lista.length === 0 ? html`<span class="prop-meta">—</span>` : html`${lista.join(' · ')}`;
   }
 
   private _renderEmails(p: any): TemplateResult {
     const c = this.contatosPorPessoa.get(Number(p?.id));
-    if (!c) return html`<span class="prop-meta">…</span>`;
+    if (!c) return this._renderContatoNaoLido(p);
     const lista = (c.emails || []).map((e: any) => String(e.email));
     return lista.length === 0 ? html`<span class="prop-meta">—</span>` : html`${lista.join(' · ')}`;
   }
 
   private _renderContatos(p: any): TemplateResult {
     const c = this.contatosPorPessoa.get(Number(p?.id));
-    if (!c) return html`<span class="prop-meta">…</span>`;
+    if (!c) return this._renderContatoNaoLido(p);
     const partes = [
       ...(c.telefones || []).map((t: any) => String(t.telefone_formatado ?? t.telefone)),
       ...(c.emails || []).map((e: any) => String(e.email)),
@@ -2788,9 +2875,14 @@ export class AppReg360 extends LitElement {
   }
 
   private _renderImoveisDaPessoa(p: any): TemplateResult {
-    if (this.parcelamentoIndexado === null) return html`<span class="prop-meta">—</span>`;
     const lista = this.imoveisPorPessoa.get(Number(p?.id)) || [];
-    if (lista.length === 0) return html`<span class="prop-meta">nenhum neste parcelamento</span>`;
+    // "nenhum neste parcelamento" por linha, com lotes que não responderam,
+    // era afirmação por célula contradizendo o banner — ninguém lê o banner
+    // para conferir uma célula. A decisão mora em comum/, com os quatro estados.
+    const texto = textoImoveisDaPessoa({
+      estado: this._estadoIndice, quantidade: lista.length, lotesQueFalharam: this.lotesQueFalharam,
+    });
+    if (texto !== null) return html`<span class="prop-meta">${texto}</span>`;
     return html`<urbi-wrap>${lista.map(({ imovel, vinculo }) => html`
       <urbi-badge cor="padrao">${nomeDe(imovel)}${vinculo?.tipo_vinculo
         ? ` · ${ROTULO_VINCULO[vinculo.tipo_vinculo] ?? vinculo.tipo_vinculo}` : ''}</urbi-badge>`)}
@@ -2835,11 +2927,14 @@ export class AppReg360 extends LitElement {
       <p class="prop-meta">${this._renderContatos(p)}</p>
       <p class="secao-titulo">Imóveis</p>
       <p class="prop-meta">
-        ${this.parcelamentoIndexado === null
+        ${this._estadoIndice !== 'indexado'
           ? html`O Núcleo não expõe pessoa → imóveis. Indexe um parcelamento na
               <a href=${urbiVerso.href('/moradores')} @click=${(e: Event) => { e.preventDefault(); this._navegar('/moradores'); }}>lista de moradores</a>
               para ver os imóveis desta pessoa naquele recorte.`
-          : this._renderImoveisDaPessoa(p)}
+          // Sem dizer QUAL parcelamento, "nenhum neste parcelamento" aqui não
+          // tem o banner da lista para dar contexto — e vira afirmação solta.
+          : html`No recorte de <strong>${this._nomeParcelamento(this.parcelamentoIndexado)}</strong>:
+              ${this._renderImoveisDaPessoa(p)}`}
       </p>
       ${this._renderAcoesDaPessoa(p)}
     `;
