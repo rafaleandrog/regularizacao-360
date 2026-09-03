@@ -138,8 +138,9 @@ export function situacaoRegistralRelevante(situacao: unknown): boolean {
  * Texto da carga de `parcelamento_dados` nos estados sem dado; `null` em
  * `concluida` — aí quem fala é o próprio valor lido, não um marcador de espera.
  *
- * É o mesmo par de frases do aviso de quitação (o padrão já usado ali), só
- * que endereçado ao registro de um parcelamento em vez de a uma lista.
+ * Segue o mesmo padrão do aviso do filtro de quitação na tabela de lotes
+ * (carregando… / não carregou), endereçado ao registro de um parcelamento em
+ * vez de a uma lista — o padrão, não as frases.
  */
 export const TEXTO_REGULARIZACAO_NAO_LIDA: Record<EstadoContagem, string | null> = {
   correndo: 'Carregando os dados de regularização…',

@@ -261,6 +261,8 @@ export class AppReg360 extends LitElement {
    * `irregular`, uma afirmação jurídica.
    */
   @state() private leituraRegularizacao: EstadoContagem = 'correndo';
+  /** A requisição de `parcelamento_dados` em voo, se houver — ver `_carregarRegularizacao`. */
+  private cargaRegularizacaoEmVoo: Promise<void> | null = null;
   /** Dados do imóvel aberto: preços de contrato e manual. */
   @state() private dadosDoImovel: any = {};
   /**
@@ -810,22 +812,32 @@ export class AppReg360 extends LitElement {
    * registros no máximo — sem isso, os chips de fase e os badges dos cards
    * fariam 60 chamadas.
    */
-  private async _carregarRegularizacao() {
-    if (this.leituraRegularizacao === 'concluida') return;
+  private _carregarRegularizacao(): Promise<void> {
+    if (this.leituraRegularizacao === 'concluida') return Promise.resolve();
+    // Três telas disparam esta carga (home, lista e detalhe), e navegar entre
+    // elas antes de a primeira resolver abria uma segunda requisição — cuja
+    // falha tardia escrevia 'falhou' por cima de 'concluida', escondendo
+    // "Editar regularização" sobre um mapa já correto. Uma em voo por vez.
+    if (this.cargaRegularizacaoEmVoo) return this.cargaRegularizacaoEmVoo;
     this.leituraRegularizacao = 'correndo';
-    try {
-      const { dados } = await reg360Api.listarParcelamentoDados();
-      this.regularizacaoPorParcelamento = new Map(
-        (dados || []).map((d: any) => [Number(d.parcelamento_id), d]),
-      );
-      this.leituraRegularizacao = 'concluida';
-    } catch (e: any) {
-      // Marca a falha (e não some nela): sem isso, a falha faria a tela
-      // derivar a fase de um mapa vazio, e `faseRegularizacao(undefined)` é
-      // `irregular` — uma afirmação jurídica sobre 60 parcelamentos.
-      this.leituraRegularizacao = 'falhou';
-      this._registrarFalha(e, 'Falha ao carregar dados de regularização');
-    }
+    this.cargaRegularizacaoEmVoo = (async () => {
+      try {
+        const { dados } = await reg360Api.listarParcelamentoDados();
+        this.regularizacaoPorParcelamento = new Map(
+          (dados || []).map((d: any) => [Number(d.parcelamento_id), d]),
+        );
+        this.leituraRegularizacao = 'concluida';
+      } catch (e: any) {
+        // Marca a falha (e não some nela): sem isso, a falha faria a tela
+        // derivar a fase de um mapa vazio, e `faseRegularizacao(undefined)` é
+        // `irregular` — uma afirmação jurídica sobre 60 parcelamentos.
+        this.leituraRegularizacao = 'falhou';
+        this._registrarFalha(e, 'Falha ao carregar dados de regularização');
+      } finally {
+        this.cargaRegularizacaoEmVoo = null;
+      }
+    })();
+    return this.cargaRegularizacaoEmVoo;
   }
 
   /**

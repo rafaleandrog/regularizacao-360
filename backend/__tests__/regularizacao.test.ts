@@ -172,6 +172,12 @@ describe('textoDadoRegularizacao — "—" só depois de ler', () => {
     assert.equal(textoDadoRegularizacao('concluida', 34521, (v) => 'x' + v), 'x34521');
   });
 
+  test('zero é valor, não ausência', () => {
+    // Área de viário ou servidão igual a zero é dado real — `—` aqui diria "não tem"
+    assert.equal(textoDadoRegularizacao('concluida', 0, (v) => String(v)), '0');
+    assert.notEqual(textoDadoRegularizacao('concluida', 0, (v) => String(v)), '—');
+  });
+
   test('DISTINÇÃO: mesmo valor ausente, "correndo" e "concluida" não se confundem', () => {
     assert.notEqual(textoDadoRegularizacao('correndo', null), textoDadoRegularizacao('concluida', null));
   });
@@ -228,7 +234,7 @@ describe('edicaoRegularizacaoLiberada — editar só com o registro lido', () =>
   });
 });
 
-describe('TEXTO_REGULARIZACAO_NAO_LIDA', () => {
+describe('TEXTO_REGULARIZACAO_NAO_LIDA — dois estados sem dado, frases distintas', () => {
   test('tem as três chaves de EstadoContagem', () => {
     assert.deepEqual(Object.keys(TEXTO_REGULARIZACAO_NAO_LIDA).sort(), ['concluida', 'correndo', 'falhou']);
   });
