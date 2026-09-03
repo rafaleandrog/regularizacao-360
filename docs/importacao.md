@@ -63,7 +63,8 @@ O separador agora é decidido pelo texto:
 | (ocupação morador↔lote) | `nucleo.imovel_pessoas` | `POST /lotes/:id/pessoas` |
 | Nº Decreto | `reg360.parcelamento_dados` | `parcelamento_id` |
 | Preço | `reg360.imovel_dados.preco_estatico` | **gravação única** — ver abaixo |
-| Uso, Tipo Lote | — | **não gravado**; vai para o relatório (ver abaixo) |
+| Uso | `reg360.imovel_dados.uso` | `imovel_id` (`lote.id`), via `PUT /imovel-dados/lote/:id` — ver abaixo |
+| Tipo Lote | — | **não gravado**; sempre derivado do Uso pelo app (ver abaixo) |
 | Status (Contratado / CP / Vendido) | — | **não gravado**; relatório de pendências |
 
 **O objeto é o LOTE, não a unidade.** A premissa da spec v0.9 de que todo lote gera uma unidade default nunca virou realidade: `unidades.incorporacao_id` é NOT NULL, então unidade só existe sob incorporação.
@@ -79,6 +80,8 @@ O script não decide qual valor vale. Ele mostra os dois e deixa a decisão com 
 Diferente do preço, `uso` **não é gravação única** — é campo descritivo, editável a qualquer momento pela tela (`criador`/admin). O script grava (`PUT /imovel-dados/lote/:id`) toda vez que a linha traz um valor, sem perguntar se já havia um: reimportar corrige um valor desatualizado em vez de deixá-lo parado. Mesmo padrão do Nº Decreto, que também sobrescreve sem checar.
 
 `tipo_lote` **não é gravado, nunca** — não tem coluna própria; é sempre derivado do Uso pelo app (`tipoLoteDeUso()`, `comum/catalogos.ts`). Uma linha com Tipo Lote preenchido e Uso vazio não tem o que derivar, e vira pendência (*Tipo Lote sem Uso*) em vez de ser descartada.
+
+Sobrescrever sem checar tem um custo: se alguém editar `uso` manualmente pela tela e a planilha for reimportada depois com um valor desatualizado na coluna Uso, o valor manual é perdido **silenciosamente** — sem `409`, sem entrada em divergências. Diferente do preço, `uso` não tem essa proteção.
 
 ## O que não é importado, e por quê
 
