@@ -17,7 +17,8 @@ import {
 import { badgeStatusParcelamento } from '../comum/status-parcelamento.js';
 import {
   faseRegularizacao, badgeFase, BADGE_FASE_NAO_LIDA, badgeSituacaoRegistral, situacaoRegistralRelevante,
-  FASES, SITUACOES_REGISTRAIS,
+  FASES, SITUACOES_REGISTRAIS, TEXTO_REGULARIZACAO_NAO_LIDA, avisoFiltroFase, textoDadoRegularizacao,
+  rotuloMatriculaMae, edicaoRegularizacaoLiberada,
 } from '../comum/regularizacao.js';
 import { soData, hoje, statusVigencia, type StatusVigencia } from '../comum/cascata.js';
 import {
@@ -250,11 +251,16 @@ export class AppReg360 extends LitElement {
   /** `parcelamento_id` → dados de regularização do app. */
   @state() private regularizacaoPorParcelamento = new Map<number, any>();
   /**
-   * A carga de `parcelamento_dados` terminou? Sem isto, o mapa vazio é
-   * indistinguível de "nenhum parcelamento tem registro" — e a fase derivada
-   * de "sem registro" é `irregular`, uma afirmação jurídica.
+   * Estado da carga de `parcelamento_dados` — três estados, não a ausência de
+   * um. Sem isto, `false` cobria tanto "ainda correndo" quanto "falhou", e não
+   * havia como oferecer "Tentar de novo": era o mesmo `false` para sempre, ou
+   * até a próxima visita repetir a chamada do zero.
+   *
+   * O mapa vazio durante a carga (ou depois de falhar) é indistinguível de
+   * "nenhum parcelamento tem registro" — e a fase derivada de "sem registro" é
+   * `irregular`, uma afirmação jurídica.
    */
-  @state() private regularizacaoLida = false;
+  @state() private leituraRegularizacao: EstadoContagem = 'correndo';
   /** Dados do imóvel aberto: preços de contrato e manual. */
   @state() private dadosDoImovel: any = {};
   /**
@@ -541,6 +547,11 @@ export class AppReg360 extends LitElement {
           this.setores = await reg360Api.setores();
           this.parcelamentos = await reg360Api.parcelamentos();
           void this._varrerLotes();
+          // Sem isto, abrir /parcelamentos direto (ou dar reload) nunca disparava
+          // a carga — home e detalhe chamavam, esta tela não — e ficava com
+          // "fase não lida" em todos os cards e o filtro por fase sem cortar,
+          // para sempre.
+          void this._carregarRegularizacao();
           break;
         case 'lotes':
           await this._carregarLotesGlobais(1);
@@ -800,16 +811,19 @@ export class AppReg360 extends LitElement {
    * fariam 60 chamadas.
    */
   private async _carregarRegularizacao() {
-    if (this.regularizacaoLida) return;
+    if (this.leituraRegularizacao === 'concluida') return;
+    this.leituraRegularizacao = 'correndo';
     try {
       const { dados } = await reg360Api.listarParcelamentoDados();
       this.regularizacaoPorParcelamento = new Map(
         (dados || []).map((d: any) => [Number(d.parcelamento_id), d]),
       );
-      this.regularizacaoLida = true;
+      this.leituraRegularizacao = 'concluida';
     } catch (e: any) {
-      // Continua NÃO lida: sem isso, a falha faria a tela derivar a fase de um
-      // mapa vazio, e `faseRegularizacao(undefined)` é `irregular`.
+      // Marca a falha (e não some nela): sem isso, a falha faria a tela
+      // derivar a fase de um mapa vazio, e `faseRegularizacao(undefined)` é
+      // `irregular` — uma afirmação jurídica sobre 60 parcelamentos.
+      this.leituraRegularizacao = 'falhou';
       this._registrarFalha(e, 'Falha ao carregar dados de regularização');
     }
   }
@@ -823,7 +837,7 @@ export class AppReg360 extends LitElement {
    * deixa de ser derivação e vira chute sobre a situação jurídica de todos.
    */
   private _faseDe(parcelamentoId: unknown) {
-    if (!this.regularizacaoLida) return null;
+    if (this.leituraRegularizacao !== 'concluida') return null;
     return faseRegularizacao(this.regularizacaoPorParcelamento.get(Number(parcelamentoId)));
   }
 
@@ -2091,8 +2105,8 @@ export class AppReg360 extends LitElement {
     else if (this.rota.filtroSetor) base = base.filter((p) => p.setor_habitacional_id === this.rota.filtroSetor);
     // Filtrar por fase sem os dados lidos devolveria lista vazia com a mensagem
     // "nenhum parcelamento com esse filtro" — outra afirmação sem base. Com a
-    // carga pendente, o filtro não corta.
-    if (this.rota.filtroFase && this.regularizacaoLida) {
+    // carga pendente ou falhada, o filtro não corta (e o aviso abaixo diz isso).
+    if (this.rota.filtroFase && this.leituraRegularizacao === 'concluida') {
       base = base.filter((p) => this._faseDe(p.id) === this.rota.filtroFase);
     }
     const filtrados = filtrarPorTexto(base, this.termoBusca, ['nome', 'slug']);
@@ -2129,6 +2143,14 @@ export class AppReg360 extends LitElement {
           this._navegar(this.rota.filtroFase === id ? '/parcelamentos' : `/parcelamentos/fase/${id}`);
         }}
       ></urbi-chips-atalho>
+
+      ${this.rota.filtroFase && avisoFiltroFase(this.leituraRegularizacao)
+        ? html`<p class="prop-meta">${avisoFiltroFase(this.leituraRegularizacao)}
+            ${this.leituraRegularizacao === 'falhou'
+              ? html` <urbi-botao variante="fantasma" pequeno @click=${() => void this._carregarRegularizacao()}>Tentar de novo</urbi-botao>`
+              : nothing}
+          </p>`
+        : nothing}
 
       ${situacoesPresentes.length > 0
         ? html`<urbi-wrap>${situacoesPresentes.map((op) => html`
@@ -2391,23 +2413,31 @@ export class AppReg360 extends LitElement {
           : nothing}
       </urbi-wrap>
       <div class="prop-meta">
-        ${p.slug ?? ''} · Nº Decreto: <strong>${reg.numero_decreto || '—'}</strong>
-        · Matrícula-mãe: ${rotuloReferencia(mat ? nomeDe(mat) : null, reg.matricula_id)}
+        ${p.slug ?? ''} · Nº Decreto: <strong>${textoDadoRegularizacao(this.leituraRegularizacao, reg.numero_decreto)}</strong>
+        · Matrícula-mãe: ${rotuloMatriculaMae(this.leituraRegularizacao, mat ? nomeDe(mat) : null, reg.matricula_id)}
         · Registro no Núcleo: ${bNucleo.label}
       </div>
       ${this.podeEditarRegularizacao
-        ? html`<div class="barra-acoes">
-            <urbi-botao variante="secundario" pequeno icone="fa-solid fa-pen"
-              @click=${() => this._abrirFormRegularizacao()}>Editar regularização</urbi-botao>
-          </div>`
+        ? (edicaoRegularizacaoLiberada(this.leituraRegularizacao)
+            ? html`<div class="barra-acoes">
+                <urbi-botao variante="secundario" pequeno icone="fa-solid fa-pen"
+                  @click=${() => this._abrirFormRegularizacao()}>Editar regularização</urbi-botao>
+              </div>`
+            // Com o registro não lido o form nasceria de `|| {}` (`_abrirFormRegularizacao`)
+            // e salvar apagaria decreto, matrícula, áreas e datas já gravados.
+            : html`<p class="prop-meta">${TEXTO_REGULARIZACAO_NAO_LIDA[this.leituraRegularizacao]} — edição indisponível até a leitura concluir.
+                ${this.leituraRegularizacao === 'falhou'
+                  ? html` <urbi-botao variante="fantasma" pequeno @click=${() => void this._carregarRegularizacao()}>Tentar de novo</urbi-botao>`
+                  : nothing}
+              </p>`)
         : nothing}
       <urbi-wrap>
         <urbi-kpi rotulo="Lotes" .valor=${this.lotes.length} formato="numero"></urbi-kpi>
         <urbi-kpi rotulo="Área do parcelamento (m²)" .valor=${fmtArea(p.area)} formato="texto"></urbi-kpi>
         <urbi-kpi rotulo="Área dos lotes (m²)" .valor=${fmtArea(areaLotes)} formato="texto"></urbi-kpi>
-        <urbi-kpi rotulo="Área poligonal (m²)" .valor=${fmtArea(reg.area_poligonal)} formato="texto"></urbi-kpi>
-        <urbi-kpi rotulo="Área de viário (m²)" .valor=${fmtArea(reg.area_viario)} formato="texto"></urbi-kpi>
-        <urbi-kpi rotulo="Área de servidão (m²)" .valor=${fmtArea(reg.area_servidao)} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Área poligonal (m²)" .valor=${textoDadoRegularizacao(this.leituraRegularizacao, reg.area_poligonal, fmtArea)} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Área de viário (m²)" .valor=${textoDadoRegularizacao(this.leituraRegularizacao, reg.area_viario, fmtArea)} formato="texto"></urbi-kpi>
+        <urbi-kpi rotulo="Área de servidão (m²)" .valor=${textoDadoRegularizacao(this.leituraRegularizacao, reg.area_servidao, fmtArea)} formato="texto"></urbi-kpi>
       </urbi-wrap>
       ${this._renderVgv(this._agregarLotes(this.lotes))}
       <urbi-abas
