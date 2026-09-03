@@ -392,19 +392,15 @@ describe('proximoPedidoDeIndice — pendente sempre roda; só a ausência de pen
   });
 
   // O pendente de "limpar" (null) é um pedido válido, não "vazio" — tem que
-  // rodar mesmo que o índice atual já tenha ALGO, senão o pedido de limpar
-  // (que o usuário fez por último) é o que desaparece.
-  test('pendente de limpar (null) roda quando o índice atual não é null', () => {
-    assert.equal(proximoPedidoDeIndice({ pendente: null }), null);
-  });
-
-  // O defeito que existia: um atalho descartava o pendente quando ele
-  // "batia" com o indexado. Cenário real — usuário pede para limpar
-  // (`pendente: null`) enquanto uma varredura está em voo, e ela FALHA: o
-  // `catch` de `_executarIndexacao` zera `indexado` para `null`, ficando
-  // "igual" ao pendente, e o atalho descartava o "limpar" como se não
-  // houvesse nada a fazer. Não é "nada a fazer" — é um pedido válido que
-  // ainda não rodou.
+  // rodar mesmo que o índice anterior tenha outro valor. A função não recebe
+  // mais o índice atual de propósito: a decisão é "há pendente? então é ele",
+  // e quem garante que um pendente não roda duas vezes é `_rodarPendenteDeIndiceSeHouver`,
+  // que zera `pedidoDeIndicePendente` antes de disparar o próximo.
+  // Cenário real — usuário pede para limpar (`pendente: null`) enquanto uma
+  // varredura está em voo, e ela FALHA: o `catch` de `_executarIndexacao` zera
+  // `indexado` para `null`. O atalho antigo `pendente === indexado` via `null === null`
+  // e descartava o "limpar" como se não houvesse nada a fazer. Não é "nada a fazer"
+  // — é um pedido válido que ainda não rodou.
   test('limpar enfileirado durante varredura que falhou roda — não é "nada a fazer"', () => {
     assert.equal(proximoPedidoDeIndice({ pendente: null }), null);
     assert.notEqual(proximoPedidoDeIndice({ pendente: null }), undefined);
