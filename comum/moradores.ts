@@ -276,3 +276,45 @@ export function resumoDoFiltroIncompletos(e: {
   const pendentes = (e?.estados || []).filter((s) => s === 'nao_consultado').length;
   return { podeAfirmar: pendentes === 0, pendentes };
 }
+
+// ---------------------------------------------------------------------------
+// A fila do índice: no máximo uma varredura em voo, nunca um pedido perdido
+// ---------------------------------------------------------------------------
+
+/**
+ * O que fazer com um pedido de indexação, dado o que já está em voo.
+ *
+ * Existe porque `if (this.indexando) return` — o gate antigo — sumia com a
+ * escolha do usuário (era o defeito que a separação pedido/indexado consertou),
+ * mas tirá-lo sem nada no lugar troca um defeito por outro: cinco trocas de
+ * parcelamento em um clique viram cinco varreduras concorrentes, cada uma
+ * ~100 requisições ao Núcleo. O pedido nunca pode desaparecer, mas a
+ * VARREDURA pode — e deve — esperar a de cima terminar.
+ */
+export type DecisaoDePedido = 'iniciar' | 'enfileirar' | 'limpar';
+
+export function decidirPedidoDeIndice(e: { emVoo: boolean; pedido: number | null }): DecisaoDePedido {
+  // Em voo: o pedido fica guardado como pendente, não dispara requisição —
+  // é a diferença entre "a escolha nunca some" e "a escolha sempre varre".
+  if (e?.emVoo) return 'enfileirar';
+  return e?.pedido === null ? 'limpar' : 'iniciar';
+}
+
+/**
+ * Ao terminar uma varredura, há pendente para rodar? Devolve o próximo pedido
+ * (podendo ser `null`, que é o pedido de limpar) ou `undefined` quando não há
+ * nada a fazer.
+ *
+ * Dois jeitos de "nada a fazer": nenhum pedido ficou pendente (`pendente`
+ * `undefined`), ou o pendente já É o resultado que acabou de chegar — rodar de
+ * novo repetiria ~100 requisições para reproduzir um número que já está em
+ * memória.
+ */
+export function proximoPedidoDeIndice(e: {
+  pendente: number | null | undefined;
+  indexado: number | null;
+}): number | null | undefined {
+  if (e?.pendente === undefined) return undefined;
+  if (e.pendente === e.indexado) return undefined;
+  return e.pendente;
+}

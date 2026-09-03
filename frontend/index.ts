@@ -47,6 +47,7 @@ import {
   TEXTO_OCUPANTES,
   type Situacao,
   estadoDoIndice, textoImoveisDaPessoa, estadoDoContato, resumoDoFiltroIncompletos,
+  decidirPedidoDeIndice, proximoPedidoDeIndice,
 } from '../comum/moradores.js';
 import {
   badgeAcao,
@@ -364,6 +365,12 @@ export class AppReg360 extends LitElement {
   /** Cresce a cada pedido; resultado de pedido antigo é descartado, não a escolha nova. */
   private geracaoIndice = 0;
   @state() private indexando = false;
+  /**
+   * Pedido guardado enquanto uma varredura está em voo — `undefined` quando
+   * não há nenhum. `null` é um pedido válido (o de limpar o índice), por isso
+   * não dá para usar `null` como "vazio" aqui; ver `proximoPedidoDeIndice`.
+   */
+  private pedidoDeIndicePendente: number | null | undefined = undefined;
   /**
    * Pessoa cuja consulta de contato FALHOU. Sem a marca, ela fica fora de
    * `contatosPorPessoa` igual a quem ainda não foi consultada — o mesmo `…`
@@ -1028,15 +1035,28 @@ export class AppReg360 extends LitElement {
    * Por isso o recorte é do usuário e não automático: um parcelamento custa
    * ~100 requisições e é útil; a instância inteira custaria ~6.200 e travaria a
    * tela. É a mesma decisão da busca por morador dentro do parcelamento — o
-   * usuário escolhe pagar o custo, a tela não o cobra por conta própria.
+   * usuário escolhe pagar o custo, mas paga uma vez: com uma varredura já em
+   * voo, um pedido novo entra na fila (`pedidoDeIndicePendente`, só o mais
+   * recente sobrevive) em vez de abrir outra varredura concorrente — cinco
+   * trocas rápidas no select não viram cinco vezes ~100 requisições.
    */
   private async _indexarParcelamento(parcelamentoId: number | null) {
     // O pedido é registrado ANTES de qualquer coisa: é ele que o select exibe.
     // Trocar de parcelamento no meio de uma indexação não é mais descartado —
     // era `if (this.indexando) return`, e o select ficava mostrando um
-    // parcelamento que não era o indexado. Agora o pedido novo invalida o
-    // resultado do antigo pela geração, e a escolha do usuário nunca some.
+    // parcelamento que não era o indexado. A escolha do usuário nunca some;
+    // o que pode esperar é a varredura, não o registro do pedido.
     this.parcelamentoPedido = parcelamentoId;
+    const decisao = decidirPedidoDeIndice({ emVoo: this.indexando, pedido: parcelamentoId });
+    if (decisao === 'enfileirar') {
+      this.pedidoDeIndicePendente = parcelamentoId;
+      return;
+    }
+    await this._executarIndexacao(parcelamentoId);
+  }
+
+  /** A varredura em si — só roda uma de cada vez; ver `_indexarParcelamento`. */
+  private async _executarIndexacao(parcelamentoId: number | null) {
     const geracao = ++this.geracaoIndice;
     if (parcelamentoId === null) {
       this.parcelamentoIndexado = null;
@@ -1044,6 +1064,7 @@ export class AppReg360 extends LitElement {
       this.lotesQueFalharam = 0;
       this.indiceFalhou = false;
       this.indexando = false;
+      this._rodarPendenteDeIndiceSeHouver(geracao);
       return;
     }
     this.indexando = true;
@@ -1077,6 +1098,21 @@ export class AppReg360 extends LitElement {
     } finally {
       if (geracao === this.geracaoIndice) this.indexando = false;
     }
+    this._rodarPendenteDeIndiceSeHouver(geracao);
+  }
+
+  /**
+   * Ao terminar uma varredura (sucesso ou falha), há pedido pendente? Roda
+   * agora — é o "enfileirar" de `_indexarParcelamento` sendo consumido.
+   */
+  private _rodarPendenteDeIndiceSeHouver(geracao: number) {
+    if (geracao !== this.geracaoIndice) return; // uma chamada mais nova já cuidou disto
+    const proximo = proximoPedidoDeIndice({
+      pendente: this.pedidoDeIndicePendente,
+      indexado: this.parcelamentoIndexado,
+    });
+    this.pedidoDeIndicePendente = undefined;
+    if (proximo !== undefined) void this._executarIndexacao(proximo);
   }
 
   /** O estado do índice, da decisão pura — pedido e resultado separados. */
@@ -2725,13 +2761,17 @@ export class AppReg360 extends LitElement {
           ?carregando=${this.carregando} @click=${buscar}>Buscar</urbi-botao>
       </div>
 
-      <urbi-banner variante=${ei === 'falhou' ? 'erro' : indexado ? 'info' : 'alerta'}>
+      <urbi-banner variante=${ei === 'falhou' ? 'erro' : ei === 'indexando' || indexado ? 'info' : 'alerta'}>
         ${ei === 'falhou'
           // Antes, este caso caía no texto de "vazia de propósito" — intenção
-          // dita sobre uma falha, com o select voltando sozinho a "nenhum".
+          // dita sobre uma falha, com o select voltando sozinho a "nenhum". O
+          // texto não instrui mais um gesto no select: reselecionar o mesmo
+          // valor já corrente pode não disparar `urbi:select-change` — o botão
+          // chama a indexação direto, como as falhas de matrícula já fazem.
           ? html`<strong>Não foi possível indexar ${this._nomeParcelamento(this.parcelamentoPedido)}.</strong>
               A coluna de imóveis está vazia porque a leitura falhou, não por escolha.
-              Escolha o parcelamento de novo para tentar outra vez.`
+              <urbi-botao slot="acao" variante="fantasma" pequeno
+                @click=${() => void this._indexarParcelamento(this.parcelamentoPedido)}>Tentar de novo</urbi-botao>`
           : ei === 'indexando'
             ? html`Lendo os ocupantes de <strong>${this._nomeParcelamento(this.parcelamentoPedido)}</strong>, lote a lote…
                 A coluna de imóveis ainda não vale.`
@@ -2741,8 +2781,9 @@ export class AppReg360 extends LitElement {
               cobre um recorte, e ausência aqui <strong>não</strong> quer dizer ausência de vínculo.
               ${this.lotesQueFalharam > 0
                 ? html`<br><strong>${this.lotesQueFalharam} lote(s) não responderam</strong>, então o
-                    recorte está incompleto: quem só se vincula a eles não aparece. Escolha o
-                    parcelamento de novo para tentar outra vez.`
+                    recorte está incompleto: quem só se vincula a eles não aparece.
+                    <urbi-botao slot="acao" variante="fantasma" pequeno
+                      @click=${() => void this._indexarParcelamento(this.parcelamentoPedido)}>Tentar de novo</urbi-botao>`
                 : nothing}`
           : html`<strong>A coluna de imóveis está vazia de propósito.</strong>
               O Núcleo entrega o vínculo morador↔imóvel só pelo lado do imóvel — não há rota de
@@ -2927,14 +2968,30 @@ export class AppReg360 extends LitElement {
       <p class="prop-meta">${this._renderContatos(p)}</p>
       <p class="secao-titulo">Imóveis</p>
       <p class="prop-meta">
-        ${this._estadoIndice !== 'indexado'
-          ? html`O Núcleo não expõe pessoa → imóveis. Indexe um parcelamento na
+        ${(() => {
+          const ei = this._estadoIndice;
+          // `indexando` e `falhou` caíam no mesmo texto de `nao_indexado` — a
+          // tela dizia "indexe um parcelamento" para quem já pediu e está
+          // esperando, ou para quem pediu e a leitura falhou. Cada estado tem
+          // a frase que é verdade PARA ELE, não a de "nada pedido ainda".
+          if (ei === 'indexando') {
+            return html`Lendo os ocupantes de <strong>${this._nomeParcelamento(this.parcelamentoPedido)}</strong>…`;
+          }
+          if (ei === 'falhou') {
+            return html`Não foi possível indexar <strong>${this._nomeParcelamento(this.parcelamentoPedido)}</strong>.
+                <urbi-botao variante="fantasma" pequeno
+                  @click=${() => void this._indexarParcelamento(this.parcelamentoPedido)}>Tentar de novo</urbi-botao>`;
+          }
+          if (ei === 'indexado') {
+            // Sem dizer QUAL parcelamento, "nenhum neste parcelamento" aqui não
+            // tem o banner da lista para dar contexto — e vira afirmação solta.
+            return html`No recorte de <strong>${this._nomeParcelamento(this.parcelamentoIndexado)}</strong>:
+                ${this._renderImoveisDaPessoa(p)}`;
+          }
+          return html`O Núcleo não expõe pessoa → imóveis. Indexe um parcelamento na
               <a href=${urbiVerso.href('/moradores')} @click=${(e: Event) => { e.preventDefault(); this._navegar('/moradores'); }}>lista de moradores</a>
-              para ver os imóveis desta pessoa naquele recorte.`
-          // Sem dizer QUAL parcelamento, "nenhum neste parcelamento" aqui não
-          // tem o banner da lista para dar contexto — e vira afirmação solta.
-          : html`No recorte de <strong>${this._nomeParcelamento(this.parcelamentoIndexado)}</strong>:
-              ${this._renderImoveisDaPessoa(p)}`}
+              para ver os imóveis desta pessoa naquele recorte.`;
+        })()}
       </p>
       ${this._renderAcoesDaPessoa(p)}
     `;

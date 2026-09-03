@@ -64,18 +64,20 @@ O índice reverso pessoa → imóveis era descrito por um campo só — `parcela
 
 Agora há dois campos — o que o usuário **pediu** (`parcelamentoPedido`) e o que a leitura **devolveu** (`parcelamentoIndexado`) —, e `estadoDoIndice` (`comum/moradores.ts`) deriva quatro estados da diferença entre eles:
 
-| Estado | O banner | A célula "Imóveis" |
-|---|---|---|
-| `nao_indexado` | *"vazia de propósito"*, com o custo explicado | `—` |
-| `indexando` | *"Lendo os ocupantes de X, lote a lote…"* — e a coluna ainda não vale | `…` |
-| `indexado` | *"Imóveis preenchidos para X"*, com o aviso de recorte incompleto se houver lote que não respondeu | a lista, ou a frase de vazio |
-| `falhou` | **"Não foi possível indexar X"** — a coluna está vazia porque a leitura falhou, não por escolha | *"índice não montado"* |
+| Estado | O banner | A célula "Imóveis" | O detalhe da pessoa |
+|---|---|---|---|
+| `nao_indexado` | *"vazia de propósito"*, com o custo explicado | `—` | mesmo texto: indexe um parcelamento na lista |
+| `indexando` | *"Lendo os ocupantes de X, lote a lote…"* — e a coluna ainda não vale. Variante **`info`**, não `alerta`: esperar a rede não é esperar o usuário | `…` | *"Lendo os ocupantes de X…"* |
+| `indexado` | *"Imóveis preenchidos para X"*, com o aviso de recorte incompleto se houver lote que não respondeu | a lista, ou a frase de vazio | os imóveis da pessoa naquele recorte |
+| `falhou` | **"Não foi possível indexar X"**, com um botão **"Tentar de novo"** no `slot="acao"` do `urbi-banner` — a coluna está vazia porque a leitura falhou, não por escolha | *"índice não montado"* | *"Não foi possível indexar X"*, com o mesmo botão |
+
+**A falha trocou o texto por um botão.** Dizia *"Escolha o parcelamento de novo para tentar outra vez"* — instrução para um gesto que podia não produzir nada, porque o `urbi-select` já está mostrando o parcelamento pedido: reselecionar o mesmo valor pode não disparar `change`, e nada acontece. O botão **"Tentar de novo"**, no `slot="acao"` do banner, chama a indexação de novo direto para o parcelamento pedido — o mesmo padrão que o banner de falha de matrículas já usa.
 
 **A célula só diz "nenhum neste parcelamento" com o recorte completo.** Com lotes que não responderam, ela diz *"nenhum nos lotes lidos — N não responderam"* (`textoImoveisDaPessoa`). Antes o banner global admitia o buraco e cada linha afirmava "nenhum" mesmo assim — e ninguém lê o banner para conferir uma célula.
 
-**Trocar de parcelamento durante uma indexação não é mais descartado.** Era `if (this.indexando) return`, e o select ficava exibindo um parcelamento que não era o indexado. Agora cada pedido tem uma geração; o resultado de um pedido antigo que chegue depois é descartado — a escolha nova, nunca.
+**Pedidos concorrentes viram fila, não varreduras paralelas.** Uma correção anterior trocou `if (this.indexando) return` — que descartava a escolha do usuário, o defeito original — por um contador de geração puro; mas geração descarta só o **resultado** que chega atrasado, não a **chamada** que já partiu: cinco trocas rápidas no select disparariam cinco varreduras de ~100 requisições cada, todas em voo ao mesmo tempo. Agora há no máximo **uma varredura em voo**: um pedido que chega enquanto ela roda fica **pendente** — só o mais novo, substituindo qualquer pendente anterior — e roda assim que a atual termina, por sucesso ou por falha. A escolha do usuário nunca se perde, e o custo continua sendo o de uma varredura por vez, nunca várias somadas. As decisões são funções puras em `comum/moradores.ts`: `decidirPedidoDeIndice` diz se o pedido novo dispara agora ou fica pendente, `proximoPedidoDeIndice` diz o que rodar quando a varredura atual termina. O predicado de geração continua sendo conferido inline no componente, para descartar um resultado que um "limpar" já tornou obsoleto.
 
-**O detalhe do morador diz de qual parcelamento é o recorte.** *"Nenhum neste parcelamento"* ali, sem o banner da lista por perto, era afirmação solta.
+**O detalhe do morador segue os mesmos quatro estados, não só "indexado" e "o resto".** Antes, `indexando` e `falhou` caíam os dois no mesmo texto genérico de "nunca indexei nada" — o Núcleo não expõe pessoa → imóveis, indexe um parcelamento na lista. Isso era a própria "falha vira vazio" que o resto deste documento corrige para a listagem, só que sobrevivendo aqui: uma indexação em andamento, ou uma que falhou, parecia idêntica a uma que nunca foi pedida. Agora `indexando` diz que está lendo os ocupantes daquele parcelamento, e `falhou` diz que não foi possível indexá-lo, com o mesmo botão "Tentar de novo" do banner da lista. Só em `indexado` a tela diz de qual parcelamento é o recorte antes de listar os imóveis — dizer "nenhum neste parcelamento" sem nomear o parcelamento, e sem o banner da lista por perto, era afirmação solta.
 
 ## Contato que falhou não é contato que ainda não chegou
 

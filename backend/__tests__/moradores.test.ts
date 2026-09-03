@@ -230,6 +230,8 @@ import {
   textoImoveisDaPessoa,
   estadoDoContato,
   resumoDoFiltroIncompletos,
+  decidirPedidoDeIndice,
+  proximoPedidoDeIndice,
 } from '../../comum/moradores.js';
 
 // ---------------------------------------------------------------------------
@@ -263,6 +265,13 @@ describe('estadoDoIndice — falha na indexação não é "não pedi nada"', () 
   test('indexando vence falhou — pedido novo é informação mais nova', () => {
     assert.equal(estadoDoIndice({ pedido: 46, indexado: null, indexando: true, falhou: true }), 'indexando');
   });
+
+  // A falha zera `indexado` no `catch`, então este caso (pedido === indexado)
+  // não deveria surgir na prática — mas se surgisse, falha ainda tem que
+  // vencer: um "sim, bate" não pode nascer de uma leitura que não terminou.
+  test('falhou vence mesmo quando o resultado por acaso bate com o pedido', () => {
+    assert.equal(estadoDoIndice({ pedido: 46, indexado: 46, indexando: false, falhou: true }), 'falhou');
+  });
 });
 
 describe('textoImoveisDaPessoa — "nenhum neste parcelamento" só com recorte completo', () => {
@@ -292,6 +301,14 @@ describe('textoImoveisDaPessoa — "nenhum neste parcelamento" só com recorte c
     ];
     assert.equal(new Set(t).size, 4, 'dois estados com o mesmo texto apagam a distinção');
   });
+
+  // Trocar de parcelamento limpa `imoveisPorPessoa` só quando a nova varredura
+  // termina — mas se a célula tratasse `indexando` como "ainda vale mostrar a
+  // quantidade", os badges do parcelamento ANTERIOR vazariam para a tela
+  // durante a troca, com o nome do índice velho.
+  test('indexando nunca devolve null, mesmo com quantidade > 0 do índice anterior', () => {
+    assert.notEqual(textoImoveisDaPessoa({ estado: 'indexando', quantidade: 2, lotesQueFalharam: 0 }), null);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -304,8 +321,15 @@ describe('estadoDoContato — falha não é "ainda não chegou"', () => {
     assert.equal(estadoDoContato({ consultado: false, falhou: true }), 'falhou');
   });
   test('os três estados são distintos', () => {
-    assert.equal(estadoDoContato({ consultado: false, falhou: false }), 'nao_consultado');
-    assert.equal(estadoDoContato({ consultado: true, falhou: false }), 'consultado');
+    const naoConsultado = estadoDoContato({ consultado: false, falhou: false });
+    const consultado = estadoDoContato({ consultado: true, falhou: false });
+    const falhou = estadoDoContato({ consultado: true, falhou: true });
+    assert.equal(naoConsultado, 'nao_consultado');
+    assert.equal(consultado, 'consultado');
+    assert.equal(falhou, 'falhou');
+    assert.notEqual(naoConsultado, consultado);
+    assert.notEqual(consultado, falhou);
+    assert.notEqual(naoConsultado, falhou);
   });
 });
 
@@ -329,5 +353,56 @@ describe('resumoDoFiltroIncompletos — "X de Y têm falta comprovada" espera os
 
   test('página vazia pode afirmar — não há o que esperar', () => {
     assert.equal(resumoDoFiltroIncompletos({ estados: [] }).podeAfirmar, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A fila do índice — no máximo uma varredura em voo
+// ---------------------------------------------------------------------------
+
+describe('decidirPedidoDeIndice — sem varredura em voo custa uma requisição a mais, nunca menos', () => {
+  // O defeito que isto substitui: `if (this.indexando) return` descartava a
+  // escolha inteira. Agora nada é descartado — o que muda é só QUANDO a
+  // varredura roda.
+  test('nada em voo e pedido concreto → inicia na hora', () => {
+    assert.equal(decidirPedidoDeIndice({ emVoo: false, pedido: 46 }), 'iniciar');
+  });
+
+  test('nada em voo e pedido "nenhum" → limpa na hora, sem requisição', () => {
+    assert.equal(decidirPedidoDeIndice({ emVoo: false, pedido: null }), 'limpar');
+  });
+
+  // O caso que existe pra evitar cinco varreduras concorrentes de cinco
+  // trocas rápidas no select: com uma em voo, TODO pedido novo enfileira —
+  // inclusive o de limpar, que também precisa esperar a de cima terminar
+  // antes de zerar o índice em memória.
+  test('varredura em voo → sempre enfileira, pedido concreto ou "nenhum"', () => {
+    assert.equal(decidirPedidoDeIndice({ emVoo: true, pedido: 46 }), 'enfileirar');
+    assert.equal(decidirPedidoDeIndice({ emVoo: true, pedido: null }), 'enfileirar');
+  });
+});
+
+describe('proximoPedidoDeIndice — só o pedido mais recente sobrevive à fila', () => {
+  test('nada pendente → nada a fazer', () => {
+    assert.equal(proximoPedidoDeIndice({ pendente: undefined, indexado: 46 }), undefined);
+  });
+
+  test('pendente diferente do que acabou de indexar → roda ele', () => {
+    assert.equal(proximoPedidoDeIndice({ pendente: 47, indexado: 46 }), 47);
+  });
+
+  // O pendente de "limpar" (null) é um pedido válido, não "vazio" — tem que
+  // rodar mesmo que o índice atual já tenha ALGO, senão o pedido de limpar
+  // (que o usuário fez por último) é o que desaparece.
+  test('pendente de limpar (null) roda quando o índice atual não é null', () => {
+    assert.equal(proximoPedidoDeIndice({ pendente: null, indexado: 46 }), null);
+  });
+
+  // Evita repetir ~100 requisições para reproduzir um número que já está em
+  // memória: se o que ficou pendente é exatamente o que a varredura que
+  // acabou de terminar já entregou, não há nada nesse pedido que ainda falte.
+  test('pendente igual ao que acabou de ser indexado não roda de novo', () => {
+    assert.equal(proximoPedidoDeIndice({ pendente: 46, indexado: 46 }), undefined);
+    assert.equal(proximoPedidoDeIndice({ pendente: null, indexado: null }), undefined);
   });
 });
