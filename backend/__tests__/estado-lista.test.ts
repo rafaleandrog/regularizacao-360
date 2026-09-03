@@ -1,5 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   estadoDaLista,
@@ -120,5 +121,28 @@ describe('badgeOuAvisoDeFalha — o aviso de falha vence o badge normal, por con
   test('leitura correndo ou concluída: passa o badge normal adiante, `null` incluso', () => {
     assert.deepEqual(badgeOuAvisoDeFalha(true, 'correndo', BADGE_NORMAL, AVISO_FALHA), BADGE_NORMAL);
     assert.equal(badgeOuAvisoDeFalha(true, 'concluida', null, AVISO_FALHA), null);
+  });
+});
+
+describe('urbi-tabela recebe mensagemVazio por propriedade, não por atributo', () => {
+  // Binding de atributo camelCase é no-op silencioso em Lit: `mensagemVazio=`
+  // sem ponto vira o atributo HTML `mensagemvazio` (case-insensitive), que o
+  // componente não observa — ele só observa `mensagem-vazio`. Foi assim que
+  // a mensagem de falha do #92 ficou invisível nas três tabelas do app,
+  // desde o MVP, sem erro nenhum: a propriedade ficava no default "Nenhum
+  // registro." e nada quebrava.
+  //
+  // A contagem é exata de propósito: uma tabela nova que volte ao atributo
+  // quebra o teste, e uma que suma também — presença sozinha não bastaria.
+  const conteudo = readFileSync(new URL('../../frontend/index.ts', import.meta.url), 'utf8');
+
+  test('nenhuma ocorrência usa binding de atributo (sem o ponto)', () => {
+    const semPonto = conteudo.match(/[^.]mensagemVazio=\$\{/g) ?? [];
+    assert.deepEqual(semPonto, []);
+  });
+
+  test('exatamente três ocorrências usam binding de propriedade (com o ponto)', () => {
+    const comPonto = conteudo.match(/\.mensagemVazio=\$\{/g) ?? [];
+    assert.equal(comPonto.length, 3);
   });
 });

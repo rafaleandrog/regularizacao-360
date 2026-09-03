@@ -2299,10 +2299,13 @@ export class AppReg360 extends LitElement {
         .valor=${this.buscaLotesGlobais}
         @urbi:input-change=${(e: CustomEvent) => this._buscarLotesGlobais(String(e.detail.valor ?? ''))}
       ></urbi-input>
+      <!-- O atributo do componente é 'mensagem-vazio'; 'mensagemVazio=' sem
+      ponto vira atributo 'mensagemvazio', que ninguém lê — a mensagem do
+      #92 nunca chegou por aqui. -->
       <urbi-tabela
         clicavel
         ?carregando=${this.carregando}
-        mensagemVazio=${estadoDaLista(this.leituraLotesGlobais, {
+        .mensagemVazio=${estadoDaLista(this.leituraLotesGlobais, {
           vazio: this.buscaLotesGlobais
             ? `Nenhum lote encontrado para "${this.buscaLotesGlobais}"`
             : 'Nenhum lote cadastrado nesta instância',
@@ -2529,7 +2532,7 @@ export class AppReg360 extends LitElement {
           // salvando em paralelo.
           this.leituraLotesDoParcelamento === 'correndo'
         }
-        mensagemVazio=${estadoDaLista(this.leituraLotesDoParcelamento, {
+        .mensagemVazio=${estadoDaLista(this.leituraLotesDoParcelamento, {
           vazio: this.lotes.length === 0
             ? 'Nenhum lote neste parcelamento'
             // No modo morador o filtro roda sobre `pessoasPorLote`, e lote que
@@ -2868,7 +2871,7 @@ export class AppReg360 extends LitElement {
       <urbi-tabela
         clicavel
         ?carregando=${this.carregando && this.moradores.length === 0}
-        mensagemVazio=${estadoDaLista(this.leituraMoradores, {
+        .mensagemVazio=${estadoDaLista(this.leituraMoradores, {
           vazio: this.soIncompletos
             ? (resumo.podeAfirmar
                 ? 'Nenhum cadastro com falta comprovada nesta página'
