@@ -58,7 +58,34 @@ O cabeçalho da tela diz *"N pessoa(s) física(s) no Núcleo"* — afirmação s
 
 `numeroLido` (`comum/estado-lista.ts`) devolve `null` — nunca `0` — enquanto a leitura não concluiu, e a tela troca o número por uma frase. A tabela segue a mesma regra por `estadoDaLista`, e a paginação, que **mantém** os números da leitura anterior de propósito (perdê-los seria pior), passa a dizer que são dela.
 
+## O índice tem quatro estados, e o pedido é separado do resultado
+
+O índice reverso pessoa → imóveis era descrito por um campo só — `parcelamentoIndexado: number | null` —, e `null` significava duas coisas: *"o usuário não pediu nada"* **e** *"pediu, e a indexação falhou inteira"*. O `catch` zerava o campo, o `urbi-select` voltava sozinho para *"— nenhum —"*, e o banner dizia que a coluna estava **"vazia de propósito"**: um texto de intenção, dito sobre uma falha, com a escolha do usuário descartada em silêncio.
+
+Agora há dois campos — o que o usuário **pediu** (`parcelamentoPedido`) e o que a leitura **devolveu** (`parcelamentoIndexado`) —, e `estadoDoIndice` (`comum/moradores.ts`) deriva quatro estados da diferença entre eles:
+
+| Estado | O banner | A célula "Imóveis" | O detalhe da pessoa |
+|---|---|---|---|
+| `nao_indexado` | *"vazia de propósito"*, com o custo explicado | `—` | mesmo texto: indexe um parcelamento na lista |
+| `indexando` | *"Lendo os ocupantes de X, lote a lote…"* — e a coluna ainda não vale. Variante **`info`**, não `alerta`: esperar a rede não é esperar o usuário | `…` | *"Lendo os ocupantes de X…"* |
+| `indexado` | *"Imóveis preenchidos para X"*, com o aviso de recorte incompleto se houver lote que não respondeu | a lista, ou a frase de vazio | os imóveis da pessoa naquele recorte |
+| `falhou` | **"Não foi possível indexar X"**, com um botão **"Tentar de novo"** no `slot="acao"` do `urbi-banner` — a coluna está vazia porque a leitura falhou, não por escolha | *"índice não montado"* | *"Não foi possível indexar X"*, com o mesmo botão |
+
+**A falha trocou o texto por um botão.** Dizia *"Escolha o parcelamento de novo para tentar outra vez"* — instrução para um gesto que podia não produzir nada, porque o `urbi-select` já está mostrando o parcelamento pedido: reselecionar o mesmo valor pode não disparar `change`, e nada acontece. O botão **"Tentar de novo"**, no `slot="acao"` do banner, chama a indexação de novo direto para o parcelamento pedido — o mesmo padrão que o banner de falha de matrículas já usa.
+
+**A célula só diz "nenhum neste parcelamento" com o recorte completo.** Com lotes que não responderam, ela diz *"nenhum nos lotes lidos — N não responderam"* (`textoImoveisDaPessoa`). Antes o banner global admitia o buraco e cada linha afirmava "nenhum" mesmo assim — e ninguém lê o banner para conferir uma célula.
+
+**Pedidos concorrentes viram fila, não varreduras paralelas.** Uma correção anterior trocou `if (this.indexando) return` — que descartava a escolha do usuário, o defeito original — por um contador de geração puro; mas geração descarta só o **resultado** que chega atrasado, não a **chamada** que já partiu: cinco trocas rápidas no select disparariam cinco varreduras de ~100 requisições cada, todas em voo ao mesmo tempo. Agora há no máximo **uma varredura em voo**: um pedido que chega enquanto ela roda fica **pendente** — só o mais novo, substituindo qualquer pendente anterior — e roda assim que a atual termina, por sucesso ou por falha. A escolha do usuário nunca se perde, e o custo continua sendo o de uma varredura por vez, nunca várias somadas. As decisões são funções puras em `comum/moradores.ts`: `decidirPedidoDeIndice` diz se o pedido novo dispara agora ou fica pendente, `proximoPedidoDeIndice` diz o que rodar quando a varredura atual termina — agora reduzido a responder "há pendente? então é ele". Com uma varredura em voo por vez, nunca há resultado atrasado a descartar: a fila é a única guarda de concorrência. O pendente sempre roda ao fim da varredura atual, mesmo quando parece idêntico ao que acabou de ser indexado. Um atalho de "pendente igual ao indexado, não roda" descartaria o "limpar" enfileirado durante uma varredura que falhou (a falha zera o índice para nenhum, igual ao pedido de limpar — e a tela ficava no estado "falhou" com o select em "nenhum"), e descartaria também o "Tentar de novo" do mesmo parcelamento após falha parcial. Rodar o pendente sempre custa, no pior caso, uma varredura que o usuário pediu explicitamente.
+
+**O detalhe do morador segue os mesmos quatro estados, não só "indexado" e "o resto".** Antes, `indexando` e `falhou` caíam os dois no mesmo texto genérico de "nunca indexei nada" — o Núcleo não expõe pessoa → imóveis, indexe um parcelamento na lista. Isso era a própria "falha vira vazio" que o resto deste documento corrige para a listagem, só que sobrevivendo aqui: uma indexação em andamento, ou uma que falhou, parecia idêntica a uma que nunca foi pedida. Agora `indexando` diz que está lendo os ocupantes daquele parcelamento, e `falhou` diz que não foi possível indexá-lo, com o mesmo botão "Tentar de novo" do banner da lista. Só em `indexado` a tela diz de qual parcelamento é o recorte antes de listar os imóveis — dizer "nenhum neste parcelamento" sem nomear o parcelamento, e sem o banner da lista por perto, era afirmação solta.
+
+## Contato que falhou não é contato que ainda não chegou
+
+`_carregarContatos` consulta telefones e emails pessoa a pessoa, e uma pessoa cuja consulta falha fica **sem contato consultado** — a situação dela sai `indeterminado`, que está certo. O que faltava era a célula: `…` servia para "ainda não chegou" **e** para "não vai chegar", e nada dizia se valia esperar. Agora `pessoasComFalhaDeContato` marca a falha (`estadoDoContato`), e a célula mostra *"não carregou"* no lugar do `…` — o mesmo tratamento que a coluna Pessoas da tabela de lotes já dava.
+
 ## O filtro de incompletos exclui os indeterminados
+
+**E só conta depois de os contatos chegarem.** Com `_carregarContatos` ainda em voo, todo mundo é `indeterminado`, o filtro esvazia a tabela, e a tela escrevia *"0 de 50 nesta página têm falta comprovada"* mais *"Nenhum cadastro com falta comprovada nesta página"* — duas afirmações antes da pergunta. `resumoDoFiltroIncompletos` só libera a contagem quando não há contato pendente; contato que **falhou** não é pendência, porque não vai chegar, e esperar por ele travaria o contador para sempre.
 
 O uso prático da coluna Situação é achar quem precisa de conserto — daí o chip **"Só cadastros incompletos"**. Ele filtra `incompleto`, e **não** `indeterminado`.
 
