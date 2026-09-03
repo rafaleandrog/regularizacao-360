@@ -65,7 +65,12 @@ export const CAMPOS_EDITAVEIS_IMOVEL = ['uso', 'observacao'] as const;
 export function apenasEditaveisImovel(fonte: any): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const campo of CAMPOS_EDITAVEIS_IMOVEL) {
-    if (fonte != null && fonte[campo] !== undefined) out[campo] = fonte[campo];
+    if (fonte == null || fonte[campo] === undefined) continue;
+    const valor = fonte[campo];
+    // `uso` entra em comparação exata no filtro da tela (a leitura já dá
+    // trim ao comparar contra o catálogo, mas o filtro não) — sem isso,
+    // ' CSIIR' grava cru e a linha some do filtro por Uso em silêncio.
+    out[campo] = campo === 'uso' && typeof valor === 'string' ? valor.trim() : valor;
   }
   return out;
 }

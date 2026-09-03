@@ -212,7 +212,7 @@
         },
         "uso": {
           "tipo": "texto",
-          "limite": 20
+          "limite": 60
         }
       },
       "unicos": [["imovel_id", "imovel_tipo"]],

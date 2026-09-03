@@ -464,6 +464,9 @@ export class AppReg360 extends LitElement {
   /** Debounce da busca de pessoa. Timer não é estado de render. */
   private _timerBuscaPessoa?: ReturnType<typeof setTimeout>;
 
+  /** Debounce do campo Observação do Lote/Unidade. Timer não é estado de render. */
+  private _timerObservacao?: ReturnType<typeof setTimeout>;
+
   @state() private formAberto = false;
   @state() private formModo: 'criar' | 'copiar' = 'criar';
   @state() private formOrigemId: number | null = null;
@@ -2763,7 +2766,7 @@ export class AppReg360 extends LitElement {
         // mas o catálogo já é a fonte de família — e um Uso fora dele deixaria
         // `respeitaPiso` desligado em silêncio quando essa checagem entrar.
         // O aviso é o que a #21 pede em vez disso: visível agora, não calado.
-        ? html`<urbi-banner variante="aviso">
+        ? html`<urbi-banner variante="alerta">
             Uso sem família de piso conhecida: <strong>${this._usosSemFamiliaDoParcelamento.join(', ')}</strong>.
             A checagem de piso não vale para esses lotes até o catálogo em <code>comum/catalogos.ts</code> aprender o valor.
           </urbi-banner>`
@@ -2864,6 +2867,7 @@ export class AppReg360 extends LitElement {
       </urbi-wrap>
       ${this.podeCriar && this.leituraDadosDoImovel === 'concluida'
         ? html`<urbi-select label="Uso"
+            ?desabilitado=${this.carregando}
             .opcoes=${[
               { valor: '', rotulo: '— sem uso —' },
               ...sugestoesDeUso().map((v) => ({ valor: v, rotulo: rotuloDeUso(v) ?? v })),
@@ -2883,14 +2887,22 @@ export class AppReg360 extends LitElement {
             }}
           ></urbi-select>
           <urbi-input label="Observação"
+            ?desabilitado=${this.carregando}
             .valor=${this.dadosDoImovel?.observacao ?? ''}
             @urbi:input-change=${(e: CustomEvent) => {
               if (!this.rota.id) return;
               const observacao = String(e.detail.valor ?? '');
-              void this._acaoPreco(
-                () => reg360Api.salvarDadosImovel(this.rota.view as string, this.rota.id!, { observacao: observacao || null }),
-                'Observação atualizada',
-              );
+              // `urbi-input` só expõe `urbi:input-change` (sem evento de
+              // blur/commit no catálogo) — sem debounce, cada tecla dispara
+              // um PUT completo. 600ms: mesma ordem do debounce de busca
+              // (300ms), mais folgado por ser texto livre mais longo.
+              clearTimeout(this._timerObservacao);
+              this._timerObservacao = setTimeout(() => {
+                void this._acaoPreco(
+                  () => reg360Api.salvarDadosImovel(this.rota.view as string, this.rota.id!, { observacao: observacao || null }),
+                  'Observação atualizada',
+                );
+              }, 600);
             }}
           ></urbi-input>`
         : nothing}
