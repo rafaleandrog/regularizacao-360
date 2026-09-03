@@ -132,6 +132,10 @@ export const reg360Api = {
     urbiVerso.api(`/imovel-dados/${tipo}/${id}/preco-estatico/corrigir`, JSON_POST({ preco_estatico: preco })),
   salvarPrecoManual: (tipo: string, id: number, preco: number | null): Promise<any> =>
     urbiVerso.api(`/imovel-dados/${tipo}/${id}/preco-manual`, JSON_POST({ preco_m2_manual: preco }, 'PUT')),
+  // Uso e observação (#20) — `tipo_lote` não entra: é sempre derivado do Uso
+  // (`tipoLoteDeUso()`, comum/catalogos.ts), a rota nem o aceita.
+  salvarDadosImovel: (tipo: string, id: number, campos: { uso?: string | null; observacao?: string | null }): Promise<any> =>
+    urbiVerso.api(`/imovel-dados/${tipo}/${id}`, JSON_POST(campos, 'PUT')),
   // Quitação tem rota própria porque tem GATE próprio: é constatação
   // financeira (validador_interno), não cadastro (criador).
   quitarImovel: (tipo: string, id: number): Promise<any> =>

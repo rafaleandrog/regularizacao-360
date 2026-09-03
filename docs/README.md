@@ -117,13 +117,12 @@ O roteiro do dia — inclusive o que **não** fazer com o `preco_estatico` — e
 
 ## Estado atual
 
-O app está **completo em código** e ainda **não instalado numa instância**. Navegação territorial, propostas em quatro níveis com cascata, preços, VGV, regularização do parcelamento, ações judiciais, moradores e quitação: tudo escrito, testado e documentado.
+O app está **completo em código** e ainda **não instalado numa instância**. Navegação territorial, propostas em quatro níveis com cascata, preços, VGV, regularização do parcelamento, ações judiciais, moradores, quitação e Uso/Tipo de Lote: tudo escrito, testado e documentado.
 
 Falta o que depende de coisas fora daqui:
 
 | Pendência | Depende de |
 |---|---|
-| Valores de **Uso** e **Tipo de Lote** | Catálogo fechado (**#22**): seis valores de Uso, cada um com significado e família de piso; Tipo de Lote é sempre derivado do Uso (`Residencial`/`Comercial`), não é campo próprio do legado. O destino do dado é o objeto Lote do Núcleo, e o payload dele ainda não traz nenhum dos dois campos |
 | **Transação** | A entidade **já existe** no Núcleo (SDK 52). Falta reconciliar os tipos e ligar o interruptor, na instância — **#80** |
 | **Release e QA** na instância intermediária | Instalação na Pinguim |
 

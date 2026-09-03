@@ -11,10 +11,9 @@ import type { EstadoContagem } from './agregados.js';
 /**
  * Campos que **só** as rotas dedicadas podem escrever.
  *
- * Existe porque `salvar()` de `imovel-dados` aceita qualquer objeto: no dia em
- * que entrar um PUT descritivo (issue #20, com `uso`, `tipo_lote`,
- * `observacao`), nada impediria o cliente de mandar `quitado: true` no mesmo
- * corpo e pular o gate de `validador_interno`.
+ * Existe porque `salvar()` de `imovel-dados` aceita qualquer objeto: o PUT
+ * descritivo da issue #20 (`uso`, `observacao`) não pode deixar o cliente
+ * mandar `quitado: true` no mesmo corpo e pular o gate de `validador_interno`.
  *
  * A guarda é aqui, e não na rota, para que a próxima rota de escrita a herde
  * sem precisar lembrar dela — a falha desse tipo de regra é ausência, não erro.
@@ -43,6 +42,37 @@ export function semCamposProtegidos(
   return {
     erro: `${invasores.join(', ')} não se escreve por aqui — use a rota própria`,
   };
+}
+
+/**
+ * Campos que o PUT descritivo de `imovel_dados` aceita — a allowlist que a
+ * #20 pedia e que faltava (`comum/regularizacao.ts` e `comum/cascata.ts` já
+ * têm a irmã desta para `parcelamento_dados` e `propostas`).
+ *
+ * `tipo_lote` **não está aqui de propósito**: a #22 decidiu que ele é sempre
+ * derivado do Uso (`tipoLoteDeUso()`, em `comum/catalogos.ts`), nunca um valor
+ * próprio — gravar os dois seria uma segunda fonte da verdade dentro do
+ * próprio app, o mesmo problema que a #19 evita em relação ao Núcleo.
+ */
+export const CAMPOS_EDITAVEIS_IMOVEL = ['uso', 'observacao'] as const;
+
+/**
+ * Extrai só os campos editáveis de um corpo de requisição (whitelist) — o que
+ * falta é ignorado, o que não é permitido some. Complementar a
+ * `semCamposProtegidos`: uma é allowlist do que entra, a outra é recusa
+ * explícita do que não pode — a rota usa as duas.
+ */
+export function apenasEditaveisImovel(fonte: any): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const campo of CAMPOS_EDITAVEIS_IMOVEL) {
+    if (fonte == null || fonte[campo] === undefined) continue;
+    const valor = fonte[campo];
+    // `uso` entra em comparação exata no filtro da tela (a leitura já dá
+    // trim ao comparar contra o catálogo, mas o filtro não) — sem isso,
+    // ' CSIIR' grava cru e a linha some do filtro por Uso em silêncio.
+    out[campo] = campo === 'uso' && typeof valor === 'string' ? valor.trim() : valor;
+  }
+  return out;
 }
 
 export interface Quitacao {

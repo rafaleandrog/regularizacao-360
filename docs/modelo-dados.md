@@ -42,13 +42,17 @@ Esses campos são do processo administrativo da UP, não do registro do imóvel.
 
 O `status` do Núcleo continua exibido ao lado, como dado registral de apoio, sem competir com a fase. Ver [regularizacao.md](regularizacao).
 
-## `imovel_dados` — preço e quitação por imóvel
+## `imovel_dados` — preço, quitação, uso e observação por imóvel
 
 Chave composta `(imovel_id, imovel_tipo)`, porque **lote 5 e unidade 5 são objetos diferentes** — filtrar só por id devolveria os dois.
 
-Guarda o que o Núcleo não tem: o **preço de contrato** (`preco_estatico`), o **preço manual** que sobrepõe a proposta, e a marca de **quitação** com autoria e data.
+Guarda o que o Núcleo não tem: o **preço de contrato** (`preco_estatico`), o **preço manual** que sobrepõe a proposta, a marca de **quitação** com autoria e data, e — desde as issues #19/#20/#21 — o **Uso** do lote e uma **observação** livre.
 
 O preço de contrato merece nota: enquanto a entidade Transação não existir no Núcleo, ele é o **único lugar onde o valor combinado de um contrato firmado sobrevive**. É por isso que ele é de gravação única e tem gate próprio — ver [precos.md](precos) e [quitacao.md](quitacao).
+
+**`uso` é a exceção deliberada à regra do topo desta página.** As issues #19/#20/#21 nasceram parando exatamente para não criar esta coluna: `uso` é atributo do imóvel, e o destino natural dele é o objeto Lote do Núcleo, não uma tabela desta app — gravá-lo aqui é aceitar conscientemente uma segunda fonte da verdade, para o dia em que o Núcleo passar a entregar o campo. A decisão foi reaberta e confirmada pelo Ricardo (issue #19, 2026-09-03): a app é dona do campo até lá, e o custo de reconciliar depois é conhecido e aceito, não descoberto. **`tipo_lote` não tem coluna** — a #22 já tinha decidido que ele é sempre `Residencial`/`Comercial`, **derivado** do Uso (`tipoLoteDeUso()` em `comum/catalogos.ts`); gravar os dois seria uma segunda fonte da verdade dentro do próprio app, o mesmo problema evitado em relação ao Núcleo.
+
+`uso` é texto livre, sem `opcoes` no schema — mesma decisão da #22: o catálogo de valores conhecidos vive em `comum/catalogos.ts`, e um valor fora dele é aceito e aparece marcado, nunca rejeitado.
 
 Índice em `(imovel_tipo, quitado)`, que é o que o filtro da tabela de lotes usa.
 
@@ -69,8 +73,6 @@ O polo (`up_contra` / `contra_up`) é dado, não texto: os títulos do legado ca
 **Referência lógica tem três estados na tela, não dois.** Sem FK, um campo que aponta para o Núcleo pode estar *resolvido* (o alvo veio), *não resolvido* (**há id**, o alvo ainda não chegou ou falhou) ou *ausente* (não há id). `—` afirma "não tem" — usá-lo durante a carga diz que o imóvel não tem matrícula quando ele tem uma que a tela ainda não leu, e as cargas que resolvem essas referências rodam em segundo plano. A regra mora em `comum/referencias.ts` (`rotuloReferencia`), e o símbolo do estado intermediário é `…`.
 
 **Transação.** A entidade **existe no Núcleo** (`transacoes`), e é por isso que o app nunca criou uma cópia dela aqui: uma tabela própria teria virado a segunda Transação da UP no dia em que esta chegasse. O que existe é um **adaptador com interruptor**, ainda desligado — ver [transacao-integracao.md](transacao-integracao) e a **#80**.
-
-**Uso e Tipo de Lote.** Vão morar no objeto **Lote do Núcleo**. Criar as colunas em `imovel_dados` agora daria uma segunda fonte da verdade para o mesmo dado, exatamente o que esta página inteira existe para evitar. O catálogo de significados já fechou (#22 — `comum/catalogos.ts`); o que falta é só o campo chegar no payload do Lote. As issues #19, #20 e #21 precisam ser reescritas nesse sentido.
 
 **Situação de cadastro do morador.** É **derivada** de nome, CPF, contatos e vínculo — nenhum campo novo. E tem três estados, não dois, porque o Núcleo não expõe pessoa → imóveis e "não sei" não é "não tem". Ver [moradores.md](moradores).
 

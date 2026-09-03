@@ -96,7 +96,7 @@ Que `CSIIR` termine em "Residencial" não o torna residencial: uso misto admite 
 
 **Tipo de Lote não é campo próprio do legado** — é sempre `Residencial` ou `Comercial`, derivado do Uso (`tipoLoteDeUso()` em `comum/catalogos.ts`, mesma tradução de família que `familiaDoUso()` já faz).
 
-O que ainda falta para ligar a checagem na tela é o **dado**: `uso` não tem onde morar (#19/#20/#21 paradas, porque o destino é o Lote do Núcleo e o campo ainda não chegou lá). Sem `uso` no imóvel, não há o que passar para `familiaDoUso()`.
+`uso` agora tem onde morar: `imovel_dados.uso` (issues #19/#20/#21, decisão reaberta e confirmada pelo Ricardo em 2026-09-03 — ver `docs/modelo-dados.md` § `imovel_dados`), com tela de leitura, filtro e edição na tabela de lotes e no detalhe do Lote/Unidade. A checagem de piso em si (`respeitaPiso()` bloqueando ou avisando na tela de proposta) **continua não ligada** — o que existe é o Uso chegando ao imóvel e o aviso de `usosSemFamilia` quando um valor não tem família conhecida; ligar `respeitaPiso()` ao formulário de proposta é trabalho à parte, ainda não pedido por nenhuma issue.
 
 ### O `null` da família é perigoso, e por isso é visível
 
