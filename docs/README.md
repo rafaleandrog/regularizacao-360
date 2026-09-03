@@ -123,7 +123,7 @@ Falta o que depende de coisas fora daqui:
 
 | Pendência | Depende de |
 |---|---|
-| Valores de **Uso** e **Tipo de Lote** | Definição do negócio. `CSIIR` já está completo (uso misto → `comercial_misto`); falta saber se há **outros** valores de Uso e algum de Tipo de Lote — **#22**. O destino do dado é o objeto Lote do Núcleo, não uma tabela daqui |
+| Valores de **Uso** e **Tipo de Lote** | Catálogo fechado (**#22**): seis valores de Uso, cada um com significado e família de piso; Tipo de Lote é sempre derivado do Uso (`Residencial`/`Comercial`), não é campo próprio do legado. O destino do dado é o objeto Lote do Núcleo, e o payload dele ainda não traz nenhum dos dois campos |
 | **Transação** | A entidade **já existe** no Núcleo (SDK 52). Falta reconciliar os tipos e ligar o interruptor, na instância — **#80** |
 | **Release e QA** na instância intermediária | Instalação na Pinguim |
 

@@ -76,7 +76,7 @@ O script não decide qual valor vale. Ele mostra os dois e deixa a decisão com 
 
 ## O que não é importado, e por quê
 
-**Uso e Tipo de Lote.** O catálogo (#22) não fechou, e a decisão é que esses campos vão morar no objeto **Lote do Núcleo**, não numa tabela do app. Gravá-los agora criaria uma segunda fonte da verdade para o mesmo dado. As linhas vão para o relatório.
+**Uso e Tipo de Lote.** O catálogo de significados fechou (#22 — `comum/catalogos.ts`), mas o destino do dado continua sendo o objeto **Lote do Núcleo**, não uma tabela do app — e o payload do Lote ainda não traz `uso` nem `tipo_lote` (SDK 52). Gravá-los agora criaria uma segunda fonte da verdade para o mesmo dado. As linhas vão para o relatório até o campo chegar no Núcleo.
 
 **Transação.** A entidade **existe** no Núcleo (`transacoes`, SDK 52), mas o importador ainda não a escreve — o mapeamento dos status comerciais do Planilhão para os tipos do Núcleo depende de reconciliar o catálogo (**#80**). Até lá, linhas com status comercial vão para o relatório de pendências, em vez de sumir: descartar em silêncio faria o import parecer completo e deixaria o dado comercial para trás sem ninguém saber.
 
@@ -114,7 +114,7 @@ Import que só diz "ok" esconde o que não entrou. O relatório sai por categori
 - **Criados** / **Atualizados** / **Ignorados (já existiam)** — por tipo de entidade
 - **Divergências de preço** — preço de contrato já gravado, não sobrescrito
 - **Transações pendentes** — linhas com status comercial
-- **Uso / Tipo de Lote pendentes** — aguardando o catálogo
+- **Uso / Tipo de Lote pendentes** — aguardando o campo chegar no Lote do Núcleo (o catálogo de significados já fechou, #22)
 - **Erros** — por linha, com o número da linha do CSV
 
 Código de saída: `0` limpo, `2` com erros de linha, `3` interrompido (filtro ignorado — ver armadilha 1).

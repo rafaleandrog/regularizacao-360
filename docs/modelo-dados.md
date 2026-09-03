@@ -70,7 +70,7 @@ O polo (`up_contra` / `contra_up`) é dado, não texto: os títulos do legado ca
 
 **Transação.** A entidade **existe no Núcleo** (`transacoes`), e é por isso que o app nunca criou uma cópia dela aqui: uma tabela própria teria virado a segunda Transação da UP no dia em que esta chegasse. O que existe é um **adaptador com interruptor**, ainda desligado — ver [transacao-integracao.md](transacao-integracao) e a **#80**.
 
-**Uso e Tipo de Lote.** Vão morar no objeto **Lote do Núcleo**. Criar as colunas em `imovel_dados` agora daria uma segunda fonte da verdade para o mesmo dado, exatamente o que esta página inteira existe para evitar. As issues #19, #20 e #21 precisam ser reescritas nesse sentido.
+**Uso e Tipo de Lote.** Vão morar no objeto **Lote do Núcleo**. Criar as colunas em `imovel_dados` agora daria uma segunda fonte da verdade para o mesmo dado, exatamente o que esta página inteira existe para evitar. O catálogo de significados já fechou (#22 — `comum/catalogos.ts`); o que falta é só o campo chegar no payload do Lote. As issues #19, #20 e #21 precisam ser reescritas nesse sentido.
 
 **Situação de cadastro do morador.** É **derivada** de nome, CPF, contatos e vínculo — nenhum campo novo. E tem três estados, não dois, porque o Núcleo não expõe pessoa → imóveis e "não sei" não é "não tem". Ver [moradores.md](moradores).
 

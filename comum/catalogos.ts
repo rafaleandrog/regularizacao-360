@@ -4,19 +4,21 @@
  *
  * ## A decisão que este arquivo registra: texto livre, não `opcoes`
  *
- * A issue #22 pedia uma lista fechada. Ela **não pôde ser fechada**: `CSIIR` —
- * lido do badge azul da tela do legado — é o único valor de Uso **observado**,
- * e observado não é o mesmo que único. Nada garante que não haja outros na
- * base. Tipo de Lote aparece vazio (`—`) em todas as capturas, sem um único
- * valor conhecido.
+ * A issue #22 pediu uma lista fechada. Na abertura, só `CSIIR` — lido do badge
+ * azul da tela do legado — era valor **observado**, e observado não era o
+ * mesmo que único. O Ricardo respondeu as duas perguntas pendentes: a lista de
+ * Uso tem seis valores (`CSIIR`, `INST`, `RE`, `RE 2`, `RE 3`, `RO`, todos no
+ * catálogo abaixo), e Tipo de Lote **não é um campo próprio do legado** — é
+ * `Residencial` ou `Comercial`, **derivado** do Uso cadastrado no lote. Ver
+ * `tipoLoteDeUso()`.
  *
- * O significado do `CSIIR` e a família dele **foram levantados** (ver o
- * catálogo abaixo); o que continua aberto é se a lista tem mais valores.
- *
- * Diante disso, a própria #22 previa o caminho: *"Se a lista não puder ser
+ * A escolha de texto livre (em vez de `opcoes`) permanece mesmo com a lista
+ * fechada, pelo motivo abaixo — fechar a lista **hoje** não é garantia contra
+ * um valor novo aparecer numa importação futura do Planilhão, e o texto livre
+ * é o que faz esse caso ser "aceito e visível" em vez de "rejeitado na
+ * gravação". É o caminho que a própria #22 previa: *"Se a lista não puder ser
  * fechada agora, decidir explicitamente por texto livre com sugestões em vez de
- * `opcoes` — e escrever o porquê, em vez de chutar um enum."* É o que está
- * decidido aqui, e o porquê é este:
+ * `opcoes` — e escrever o porquê, em vez de chutar um enum."*
  *
  * **Enum provisório é dívida silenciosa.** Uma coluna com `opcoes` recusa valor
  * fora da lista, então cada valor novo do Planilhão viraria migração — sobre
@@ -95,23 +97,28 @@ export interface EntradaCatalogo {
 }
 
 /**
- * Catálogo de Uso.
+ * Catálogo de Uso — **lista fechada, os seis valores respondidos pelo
+ * Ricardo na issue #22** (2026-09-03).
  *
- * **Uma entrada, e ela está completa.** `CSIIR` é o único valor observado — no
- * badge azul da tela do legado —, e o significado foi levantado com o Ricardo:
- * *Comercial, Serviços, Industrial, Institucional e Residencial*. É uma
- * categoria de **uso misto**, e é o próprio Ricardo quem a classifica como
- * `comercial_misto` para efeito de piso.
+ * `CSIIR` é uso **misto**: a sigla termina em "Residencial", mas isso não a
+ * torna residencial — ela admite residência entre outros usos, e o piso que
+ * se aplica é o do conjunto. Por isso `comercial_misto`, não `residencial`. A
+ * família de cada entrada não foi derivada da leitura da sigla — foi
+ * respondida por quem define o piso, a mesma régua que já valia para `CSIIR`
+ * antes desta lista fechar: `RE`, `RE 2`, `RE 3` e `RO` são uso
+ * exclusivamente residencial (`residencial`). `INST` (institucional) não foi
+ * classificado ao pé da letra pelo Ricardo — é dedução a partir da própria
+ * regra que ele deu: só há dois baldes possíveis (Residencial ou Comercial),
+ * `RE`/`RE 2`/`RE 3`/`RO` batem residencial pelo nome, e o que sobra —
+ * `CSIIR` e `INST` — cai em `comercial_misto` por eliminação, não por leitura
+ * da sigla.
  *
- * A sigla incluir "Residencial" no final não a torna residencial: uso misto
- * admite residência entre outros usos, e o piso que se aplica é o do conjunto.
- * A família não foi derivada da leitura da sigla — foi respondida por quem
- * define o piso.
- *
- * **Uma entrada não significa lista fechada.** Nada garante que este seja o
- * único valor de Uso na base; ele é o único **observado**. Valor que aparecer
- * fora daqui é aceito (a coluna é texto livre) e cai em `usosSemFamilia`, onde
- * fica visível em vez de desligar a checagem de piso em silêncio.
+ * A coluna continua **texto livre** (ver o comentário do arquivo): a lista
+ * fechar hoje não impede um valor novo de aparecer numa importação futura, e
+ * o que "fechada" garante é que estes seis têm significado, cor e família
+ * conhecidos — não que nenhum outro vá aparecer. Valor fora daqui continua
+ * aceito e cai em `usosSemFamilia`, visível em vez de desligar a checagem de
+ * piso em silêncio.
  */
 export const CATALOGO_USO: readonly EntradaCatalogo[] = [
   {
@@ -122,16 +129,80 @@ export const CATALOGO_USO: readonly EntradaCatalogo[] = [
     familia: 'comercial_misto',
     origem: 'Badge azul da tela do legado. Significado e família respondidos pelo Ricardo na issue #22.',
   },
+  {
+    valor: 'INST',
+    rotulo: 'INST',
+    descricao: 'Institucional',
+    cor: 'info',
+    familia: 'comercial_misto',
+    origem: 'Significado respondido pelo Ricardo na issue #22 (2026-09-03). Família (comercial_misto) é dedução por eliminação a partir da regra dele — não resposta literal para este valor específico.',
+  },
+  {
+    valor: 'RE',
+    rotulo: 'RE',
+    descricao: 'Residencial Exclusivo',
+    cor: 'sucesso',
+    familia: 'residencial',
+    origem: 'Significado e família respondidos pelo Ricardo na issue #22 (2026-09-03).',
+  },
+  {
+    valor: 'RE 2',
+    rotulo: 'RE 2',
+    descricao: 'Residencial Exclusivo 2',
+    cor: 'sucesso',
+    familia: 'residencial',
+    origem: 'Significado e família respondidos pelo Ricardo na issue #22 (2026-09-03). Formato exato do valor (com espaço) como recebido — reconferir contra a base se algum dia aparecer sem casar.',
+  },
+  {
+    valor: 'RE 3',
+    rotulo: 'RE 3',
+    descricao: 'Residencial Exclusivo 3',
+    cor: 'sucesso',
+    familia: 'residencial',
+    origem: 'Significado e família respondidos pelo Ricardo na issue #22 (2026-09-03). Formato exato do valor (com espaço) como recebido — reconferir contra a base se algum dia aparecer sem casar.',
+  },
+  {
+    valor: 'RO',
+    rotulo: 'RO',
+    descricao: 'Residencial Obrigatório',
+    cor: 'sucesso',
+    familia: 'residencial',
+    origem: 'Significado e família respondidos pelo Ricardo na issue #22 (2026-09-03).',
+  },
 ];
 
 /**
- * Catálogo de Tipo de Lote — **vazio, e isso é um fato registrado**.
+ * Catálogo de Tipo de Lote — **os dois valores que o campo pode assumir,
+ * porque ele é derivado, não capturado**.
  *
- * O campo aparece na tela do legado sempre como `—` em todas as capturas. Não
- * há um único valor observado. Um catálogo vazio diz isso; um catálogo
- * inventado diria que alguém levantou.
+ * A pergunta original da #22 ("Tipo de Lote tem algum valor?") tinha uma
+ * premissa errada: o campo aparecia sempre `—` no legado não porque estivesse
+ * morto, mas porque **não existe como dado próprio** — o Ricardo respondeu que
+ * Tipo de Lote é sempre `Residencial` ou `Comercial`, calculado a partir do
+ * Uso cadastrado no lote (ver `tipoLoteDeUso()`). Por isso a lista fecha em
+ * exatamente dois valores, e nenhum dos dois vem de uma coluna do legado.
+ *
+ * Estas entradas existem para dar rótulo e cor ao valor **já derivado** —
+ * quando a tela um dia exibir Tipo de Lote (issues #19/#20/#21, hoje paradas
+ * porque nem `uso` nem `tipo_lote` chegam no payload do Lote do Núcleo), ela
+ * não deve remontar rótulo/cor na mão.
  */
-export const CATALOGO_TIPO_LOTE: readonly EntradaCatalogo[] = [];
+export const CATALOGO_TIPO_LOTE: readonly EntradaCatalogo[] = [
+  {
+    valor: 'Residencial',
+    rotulo: 'Residencial',
+    cor: 'sucesso',
+    familia: 'residencial',
+    origem: 'Derivado de familiaDoUso() === "residencial", por decisão do Ricardo na issue #22 (2026-09-03) — ver tipoLoteDeUso().',
+  },
+  {
+    valor: 'Comercial',
+    rotulo: 'Comercial',
+    cor: 'info',
+    familia: 'comercial_misto',
+    origem: 'Derivado de familiaDoUso() === "comercial_misto", por decisão do Ricardo na issue #22 (2026-09-03) — ver tipoLoteDeUso().',
+  },
+];
 
 function acharEntrada(catalogo: readonly EntradaCatalogo[], valor: unknown): EntradaCatalogo | null {
   const alvo = String(valor ?? '').trim();
@@ -188,6 +259,24 @@ export function familiaDoUso(valor: unknown): FamiliaPiso | null {
 }
 
 /**
+ * Tipo de Lote **derivado** de um valor de Uso — `Residencial`, `Comercial`,
+ * ou `null` quando o Uso não é conhecido (ou é conhecido e sem família
+ * levantada).
+ *
+ * Não existe coluna de Tipo de Lote no legado: o campo é sempre calculado a
+ * partir do Uso, por decisão do Ricardo na #22. A função só traduz o mesmo
+ * `FamiliaPiso` que `familiaDoUso()` já resolve — `residencial` vira
+ * `'Residencial'`, `comercial_misto` vira `'Comercial'` — para não haver dois
+ * lugares decidindo a mesma família com nomes diferentes.
+ */
+export function tipoLoteDeUso(valorDeUso: unknown): string | null {
+  const familia = familiaDoUso(valorDeUso);
+  if (familia === 'residencial') return 'Residencial';
+  if (familia === 'comercial_misto') return 'Comercial';
+  return null;
+}
+
+/**
  * Os usos presentes no dado cuja família de piso não é conhecida.
  *
  * **É a contrapartida do `null` silencioso**, no mesmo espírito de
@@ -222,7 +311,10 @@ export function sugestoesDeUso(): string[] {
   return CATALOGO_USO.map((e) => e.valor);
 }
 
-/** Idem, para Tipo de Lote. Vazio enquanto nenhum valor tiver sido observado. */
+/**
+ * Idem, para Tipo de Lote — `['Residencial', 'Comercial']`, os dois únicos
+ * valores possíveis, já que o campo é sempre derivado (ver `tipoLoteDeUso()`).
+ */
 export function sugestoesDeTipoLote(): string[] {
   return CATALOGO_TIPO_LOTE.map((e) => e.valor);
 }

@@ -10,6 +10,7 @@ import {
   corDeUso,
   familiaDoUso,
   descricaoDeUso,
+  tipoLoteDeUso,
   usosSemFamilia,
   sugestoesDeUso,
   sugestoesDeTipoLote,
@@ -38,10 +39,70 @@ describe('catálogo de Uso — texto livre com sugestões, não enum', () => {
     assert.equal(descricaoDeUso('INVENTADO'), null);
   });
 
-  test('Tipo de Lote está vazio, e isso é um fato registrado', () => {
-    assert.deepEqual(CATALOGO_TIPO_LOTE, []);
+  // A lista fechou com os seis valores respondidos na #22 — cada um com
+  // significado e família, não só CSIIR.
+  test('lista de Uso tem os seis valores respondidos pelo Ricardo', () => {
+    assert.deepEqual(
+      CATALOGO_USO.map((e) => e.valor),
+      ['CSIIR', 'INST', 'RE', 'RE 2', 'RE 3', 'RO'],
+    );
+    assert.equal(entradaDeUso('INST')?.descricao, 'Institucional');
+    assert.equal(entradaDeUso('RE')?.descricao, 'Residencial Exclusivo');
+    assert.equal(entradaDeUso('RE 2')?.descricao, 'Residencial Exclusivo 2');
+    assert.equal(entradaDeUso('RE 3')?.descricao, 'Residencial Exclusivo 3');
+    assert.equal(entradaDeUso('RO')?.descricao, 'Residencial Obrigatório');
+  });
+
+  test('família dos cinco valores novos: RE/RE 2/RE 3/RO residencial, INST comercial_misto', () => {
+    assert.equal(familiaDoUso('RE'), 'residencial');
+    assert.equal(familiaDoUso('RE 2'), 'residencial');
+    assert.equal(familiaDoUso('RE 3'), 'residencial');
+    assert.equal(familiaDoUso('RO'), 'residencial');
+    // INST não foi classificado ao pé da letra pelo Ricardo — é dedução por
+    // eliminação a partir da regra dele (só há dois baldes possíveis, e
+    // RE/RE 2/RE 3/RO já bateram residencial pelo nome). Ver comum/catalogos.ts.
+    assert.equal(familiaDoUso('INST'), 'comercial_misto');
+  });
+
+  // Tipo de Lote não é campo do legado: é Residencial ou Comercial, sempre
+  // derivado do Uso — a resposta que fechou a segunda metade da #22.
+  test('Tipo de Lote é derivado, com os dois valores possíveis catalogados', () => {
+    assert.deepEqual(
+      CATALOGO_TIPO_LOTE.map((e) => e.valor),
+      ['Residencial', 'Comercial'],
+    );
+    assert.deepEqual(sugestoesDeTipoLote(), ['Residencial', 'Comercial']);
+    assert.ok(entradaDeTipoLote('Residencial'));
+    assert.ok(entradaDeTipoLote('Comercial'));
     assert.equal(entradaDeTipoLote('qualquer'), null);
-    assert.deepEqual(sugestoesDeTipoLote(), []);
+    assert.equal(entradaDeTipoLote('Residencial')?.familia, 'residencial');
+    assert.equal(entradaDeTipoLote('Comercial')?.familia, 'comercial_misto');
+  });
+
+  describe('tipoLoteDeUso — a derivação em si', () => {
+    test('uso residencial vira Tipo de Lote Residencial', () => {
+      assert.equal(tipoLoteDeUso('RE'), 'Residencial');
+      assert.equal(tipoLoteDeUso('RE 2'), 'Residencial');
+      assert.equal(tipoLoteDeUso('RE 3'), 'Residencial');
+      assert.equal(tipoLoteDeUso('RO'), 'Residencial');
+    });
+
+    // Herdado de entradaDeUso()/familiaDoUso(): o mesmo .trim() já confirmado
+    // para entradaDeUso deve valer aqui, já que tipoLoteDeUso é construída em cima.
+    test('espaço ao redor não muda a derivação — herda o .trim() de entradaDeUso', () => {
+      assert.equal(tipoLoteDeUso('  RE  '), 'Residencial');
+    });
+
+    test('uso comercial_misto vira Tipo de Lote Comercial', () => {
+      assert.equal(tipoLoteDeUso('CSIIR'), 'Comercial');
+      assert.equal(tipoLoteDeUso('INST'), 'Comercial');
+    });
+
+    test('uso desconhecido não deriva Tipo de Lote nenhum', () => {
+      assert.equal(tipoLoteDeUso('INVENTADO'), null);
+      assert.equal(tipoLoteDeUso(null), null);
+      assert.equal(tipoLoteDeUso(''), null);
+    });
   });
 
   test('toda entrada carrega origem escrita — é o que o revisor lê para julgar', () => {
@@ -51,7 +112,7 @@ describe('catálogo de Uso — texto livre com sugestões, não enum', () => {
   });
 
   test('sugestão não é allowlist: valor fora dela é aceito e volta como veio', () => {
-    assert.deepEqual(sugestoesDeUso(), ['CSIIR']);
+    assert.deepEqual(sugestoesDeUso(), ['CSIIR', 'INST', 'RE', 'RE 2', 'RE 3', 'RO']);
     assert.equal(rotuloDeUso('RESIDENCIAL_UNIFAMILIAR'), 'RESIDENCIAL_UNIFAMILIAR');
   });
 });
@@ -72,6 +133,16 @@ describe('rótulo e cor — desconhecido aparece, não some', () => {
   test('cor de desconhecido é neutra — colorir por chute é vestir o badge do outro', () => {
     assert.equal(corDeUso('CSIIR'), 'info');
     assert.equal(corDeUso('INVENTADO'), 'padrao');
+  });
+
+  test('cor das sete entradas novas — trava contra troca silenciosa de badge', () => {
+    assert.equal(corDeUso('INST'), 'info');
+    assert.equal(corDeUso('RE'), 'sucesso');
+    assert.equal(corDeUso('RE 2'), 'sucesso');
+    assert.equal(corDeUso('RE 3'), 'sucesso');
+    assert.equal(corDeUso('RO'), 'sucesso');
+    assert.equal(entradaDeTipoLote('Residencial')?.cor, 'sucesso');
+    assert.equal(entradaDeTipoLote('Comercial')?.cor, 'info');
   });
 
   test('a comparação é exata, nunca por substring', () => {
@@ -116,8 +187,9 @@ describe('família de piso — o null que precisa ser visível', () => {
     assert.deepEqual(usosSemFamilia(['', null, '  ']), []);
   });
 
-  // Trava para o dia em que os valores chegarem: uso COM família não entra na
-  // lista de pendências. Hoje nenhum tem, então o teste guarda o contrato.
+  // Trava de regressão: todo valor hoje no catálogo tem família (nenhuma
+  // entrada ficou com `familia: null`), então nenhum deles pode aparecer na
+  // lista de pendências.
   test('uso com família conhecida sairia da lista', () => {
     const comFamilia = CATALOGO_USO.filter((e) => e.familia !== null).map((e) => e.valor);
     assert.deepEqual(usosSemFamilia(comFamilia), []);
