@@ -1092,7 +1092,7 @@ export class AppReg360 extends LitElement {
       this.leituraMoradores = 'falhou';
       this._registrarFalha(e, 'Falha ao carregar moradores');
     } finally {
-      this.carregando = false;
+      if (this._geracaoValida(geracao)) this.carregando = false;
     }
   }
 
@@ -2370,7 +2370,7 @@ export class AppReg360 extends LitElement {
       this.leituraLotesGlobais = 'falhou';
       this._registrarFalha(e, 'Falha ao carregar lotes');
     } finally {
-      this.carregando = false;
+      if (this._geracaoValida(geracao)) this.carregando = false;
     }
   }
 
