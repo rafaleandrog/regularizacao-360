@@ -486,6 +486,13 @@ export class AppReg360 extends LitElement {
     this.leituraPropostas = 'correndo';
     this.leituraDadosDoImovel = 'correndo';
     this.leituraContextoDoImovel = 'correndo';
+    // Faltava aqui: só o `case 'parcelamento'` reatribuía, depois de
+    // `reg360Api.parcelamento` resolver. Se essa chamada lança, o catch
+    // externo nunca chegava a tocar este estado, e ele ficava com o valor da
+    // visita ANTERIOR ('concluida' com `this.lotes = []` acima, que afirma
+    // "Nenhum lote" sobre uma leitura que nem começou; ou 'correndo' na
+    // primeira navegação, que trava em "Carregando…" para sempre).
+    this.leituraLotesDoParcelamento = 'correndo';
     this.carregando = true;
     try {
       switch (this.rota.view) {
@@ -545,12 +552,13 @@ export class AppReg360 extends LitElement {
             this.detalhe = await reg360Api.parcelamento(this.rota.id);
             // `parcelamento_id` É filtro válido em GET /lotes (ao contrário de
             // `unidades`, que nem tem essa coluna).
-            // Estado PRÓPRIO desta leitura — não `this.carregando`. A mesma tela
-            // liga `carregando` de novo depois, em `_salvarRegularizacao`,
-            // `_acaoPreco`, `_acaoDeAcao` e no form de propostas; derivar da
-            // flag global fazia a tabela voltar a "Carregando…" com os lotes
-            // já lidos, só porque um modal estava salvando.
-            this.leituraLotesDoParcelamento = 'correndo';
+            // `leituraLotesDoParcelamento` já foi posto em 'correndo' no reset
+            // síncrono do topo de `_carregar()` — não `this.carregando`. A
+            // mesma tela liga `carregando` de novo depois, em
+            // `_salvarRegularizacao`, `_acaoPreco`, `_acaoDeAcao` e no form de
+            // propostas; derivar da flag global fazia a tabela voltar a
+            // "Carregando…" com os lotes já lidos, só porque um modal estava
+            // salvando.
             try {
               this.lotes = await reg360Api.lotes({ parcelamento_id: this.rota.id });
               this.leituraLotesDoParcelamento = 'concluida';
@@ -613,6 +621,14 @@ export class AppReg360 extends LitElement {
       // cards — cada um contando sobre uma lista vazia. Sem esta marca, eles
       // diriam "0 parcelamentos" com só um banner genérico a contradizê-los.
       this.cargaFalhou = true;
+      // Só sobra 'correndo' aqui quando `reg360Api.parcelamento` lançou ANTES
+      // do try/catch interno de `leituraLotesDoParcelamento` rodar — esse
+      // try/catch já marca 'falhou' sozinho e o `throw e` dele já chega aqui
+      // com o estado certo. Sem este ajuste, a tabela ficava em
+      // "Carregando…" para sempre depois de a busca do parcelamento falhar.
+      if (this.rota.view === 'parcelamento' && this.leituraLotesDoParcelamento === 'correndo') {
+        this.leituraLotesDoParcelamento = 'falhou';
+      }
       this._registrarFalha(e, 'Falha ao carregar dados');
     } finally {
       this.carregando = false;
@@ -2369,7 +2385,14 @@ export class AppReg360 extends LitElement {
 
       <urbi-tabela
         clicavel
-        ?carregando=${this.carregando && this.lotes.length === 0}
+        ?carregando=${
+          // Estado PRÓPRIO — não this.carregando. A mensagem de vazio abaixo já
+          // usa leituraLotesDoParcelamento; o spinner usava a flag global, que
+          // liga de novo em _salvarRegularizacao, _acaoPreco etc. e fazia esta
+          // tabela voltar a girar com os lotes já lidos, só por um modal
+          // salvando em paralelo.
+          this.leituraLotesDoParcelamento === 'correndo'
+        }
         mensagemVazio=${estadoDaLista(this.leituraLotesDoParcelamento, {
           vazio: this.lotes.length === 0
             ? 'Nenhum lote neste parcelamento'

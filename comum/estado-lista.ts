@@ -7,9 +7,11 @@
  * requisição falhou produz exatamente a mesma frase — e é indistinguível,
  * porque o banner de erro no topo da tela não desfaz a frase de baixo.
  *
- * A regra é a mesma em seis telas deste app, e ter uma cópia por tela é o modo
- * de elas divergirem: uma ganha a guarda, as outras não, e ninguém percebe
- * porque a que ficou para trás continua parecendo certa.
+	 * A regra é a mesma em sete telas deste app, e ter uma cópia por tela é o modo
+	 * de elas divergirem — mas nenhuma das sete tinha a guarda. A única lista que a
+	 * implementava era a de setores da home (PR #90), e ali estava a divergência real:
+	 * na home guardada contra todas as outras desguardadas. A sétima tela (Parcelamentos)
+	 * só foi descoberta depois de a lista se apresentar como fechada sem estar.
  *
  * Puro: recebe o estado da leitura e as frases, devolve o que exibir.
  */
