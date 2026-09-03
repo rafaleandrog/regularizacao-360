@@ -25,6 +25,7 @@ import {
   lerQuitacao, estadoDaQuitacao, TEXTO_QUITACAO, podeAlternarQuitacao,
 } from '../comum/quitacao.js';
 import { estadoDaLista, numeroLido, TEXTO_AUSENCIA, sufixoNumerosAntigos, badgeOuAvisoDeFalha } from '../comum/estado-lista.js';
+import { deveAplicarResposta } from '../comum/geracao-carga.js';
 import { ABAS_TOPO } from '../comum/navegacao.js';
 import { paiDaUnidade, avisoDeHeranca } from '../comum/unidade-cadeia.js';
 import {
@@ -208,6 +209,16 @@ export class AppReg360 extends LitElement {
    * sobre uma base que ela não leu.
    */
   @state() private cargaFalhou = false;
+  /**
+   * Token de geração de `_carregar()` — ver `comum/geracao-carga.ts`.
+   *
+   * Incrementado no topo de cada chamada; o valor capturado é o que a chamada
+   * carrega consigo por todo o `await`. Sem isto, navegar de novo antes de a
+   * resposta anterior chegar deixa a resposta atrasada escrever por cima do
+   * estado da rota nova (#95) — `detalhe`, `lotes`, `propostas`, e o `catch`
+   * externo marcando `cargaFalhou` da rota nova por uma falha da anterior.
+   */
+  private geracaoCarga = 0;
 
   @state() private setores: any[] = [];
   @state() private parcelamentos: any[] = [];
@@ -495,7 +506,17 @@ export class AppReg360 extends LitElement {
   // Carregamento por view
   // -------------------------------------------------------------------------
 
+  /**
+   * A geração `g` ainda é a mais recente disparada? Chamado depois de cada
+   * `await` de `_carregar()` (e das cargas que ela dispara com o mesmo token)
+   * antes de escrever estado — ver `deveAplicarResposta`.
+   */
+  private _geracaoValida(g: number): boolean {
+    return deveAplicarResposta({ geracaoDoPedido: g, geracaoAtual: this.geracaoCarga });
+  }
+
   private async _carregar() {
+    const g = ++this.geracaoCarga;
     this.erro = null;
     this.avisoFlag = null;
     // `erro` alimenta o banner; esta flag alimenta as AFIRMAÇÕES. São coisas
@@ -533,21 +554,30 @@ export class AppReg360 extends LitElement {
     this.carregando = true;
     try {
       switch (this.rota.view) {
-        case 'home':
+        case 'home': {
           // Setores e parcelamentos são uma página cada (6 e 60) — a tela
           // aparece já. A contagem de lotes precisa varrer ~6.200 registros em
           // 32 requisições, então roda em segundo plano e preenche depois.
-          this.setores = await reg360Api.setores();
-          this.parcelamentos = await reg360Api.parcelamentos();
-          void this._carregarOrfaosDeSetor(this.parcelamentos);
+          const setores = await reg360Api.setores();
+          if (!this._geracaoValida(g)) return;
+          this.setores = setores;
+          const parcelamentos = await reg360Api.parcelamentos();
+          if (!this._geracaoValida(g)) return;
+          this.parcelamentos = parcelamentos;
+          void this._carregarOrfaosDeSetor(this.parcelamentos, g);
           void this._varrerLotes();
           void this._carregarRegularizacao();
           break;
-        case 'parcelamentos':
+        }
+        case 'parcelamentos': {
           // Setores vêm junto porque o card mostra o NOME do setor, não o id, e
           // os chips de filtro saem da lista real — nunca de array literal.
-          this.setores = await reg360Api.setores();
-          this.parcelamentos = await reg360Api.parcelamentos();
+          const setores = await reg360Api.setores();
+          if (!this._geracaoValida(g)) return;
+          this.setores = setores;
+          const parcelamentos = await reg360Api.parcelamentos();
+          if (!this._geracaoValida(g)) return;
+          this.parcelamentos = parcelamentos;
           void this._varrerLotes();
           // Sem isto, abrir /parcelamentos direto (ou dar reload) nunca disparava
           // a carga — home e detalhe chamavam, esta tela não — e ficava com
@@ -555,34 +585,46 @@ export class AppReg360 extends LitElement {
           // para sempre.
           void this._carregarRegularizacao();
           break;
+        }
         case 'lotes':
           await this._carregarLotesGlobais(1);
           break;
-        case 'moradores':
+        case 'moradores': {
           // Parcelamentos vêm junto porque o seletor de recorte do índice sai
           // da lista real, nunca de array literal.
-          this.parcelamentos = await reg360Api.parcelamentos();
+          const parcelamentos = await reg360Api.parcelamentos();
+          if (!this._geracaoValida(g)) return;
+          this.parcelamentos = parcelamentos;
           await this._carregarMoradores(1);
           break;
+        }
         case 'morador':
           if (this.rota.id) {
-            this.detalhe = await reg360Api.pessoa(this.rota.id);
+            const pessoa = await reg360Api.pessoa(this.rota.id);
+            if (!this._geracaoValida(g)) return;
+            this.detalhe = pessoa;
             this._aprenderNome(this.detalhe);
             await this._carregarContatos([this.detalhe]);
-            void this._carregarAcoesDaPessoa();
+            if (!this._geracaoValida(g)) return;
+            void this._carregarAcoesDaPessoa(g);
           }
           break;
         case 'setor':
           if (this.rota.id) {
             this.abaDetalhe = 'empreendimentos';
-            this.detalhe = await reg360Api.setor(this.rota.id);
-            this.parcelamentos = await reg360Api.parcelamentos({ setor_habitacional_id: this.rota.id });
+            const setor = await reg360Api.setor(this.rota.id);
+            if (!this._geracaoValida(g)) return;
+            this.detalhe = setor;
+            const parcelamentos = await reg360Api.parcelamentos({ setor_habitacional_id: this.rota.id });
+            if (!this._geracaoValida(g)) return;
+            this.parcelamentos = parcelamentos;
             // Recorte vazio é ambíguo: pode não haver parcelamento NESTE setor,
             // ou a instância inteira estar vazia. Só a lista global separa os
             // dois — e ela também diz quantos órfãos de setor existem, que é o
             // que explica a soma dos setores não fechar com o total.
-            await this._carregarOrfaosDeSetor();
-            await this._carregarPropostas('setor', this.rota.id);
+            await this._carregarOrfaosDeSetor(undefined, g);
+            if (!this._geracaoValida(g)) return;
+            await this._carregarPropostas('setor', this.rota.id, g);
             void this._varrerLotes();
           }
           break;
@@ -591,7 +633,9 @@ export class AppReg360 extends LitElement {
             this.abaDetalhe = 'lotes';
             this.paginaLotes = 1;
             this.termoBusca = '';
-            this.detalhe = await reg360Api.parcelamento(this.rota.id);
+            const parcelamento = await reg360Api.parcelamento(this.rota.id);
+            if (!this._geracaoValida(g)) return;
+            this.detalhe = parcelamento;
             // `parcelamento_id` É filtro válido em GET /lotes (ao contrário de
             // `unidades`, que nem tem essa coluna).
             // `leituraLotesDoParcelamento` já foi posto em 'correndo' no reset
@@ -602,21 +646,25 @@ export class AppReg360 extends LitElement {
             // "Carregando…" com os lotes já lidos, só porque um modal estava
             // salvando.
             try {
-              this.lotes = await reg360Api.lotes({ parcelamento_id: this.rota.id });
+              const lotes = await reg360Api.lotes({ parcelamento_id: this.rota.id });
+              if (!this._geracaoValida(g)) return;
+              this.lotes = lotes;
               this.leituraLotesDoParcelamento = 'concluida';
             } catch (e) {
+              if (!this._geracaoValida(g)) return;
               this.leituraLotesDoParcelamento = 'falhou';
               throw e;
             }
-            await this._carregarPropostas('parcelamento', this.rota.id);
-            void this._carregarMatriculas();
-            void this._carregarPessoasDaPagina();
+            await this._carregarPropostas('parcelamento', this.rota.id, g);
+            if (!this._geracaoValida(g)) return;
+            void this._carregarMatriculas(g);
+            void this._carregarPessoasDaPagina(undefined, g);
             void this._carregarRegularizacao();
             // Sem isto, abrir a página direto (ou dar reload nela) renderiza o
             // VGV com as bases vazias: R$ 0 e "todos sem preço", com cara de
             // resposta. Não precisa varrer os lotes da instância — os lotes
             // deste parcelamento já vieram acima.
-            void this._carregarBasesDoVgv();
+            void this._carregarBasesDoVgv(g);
           }
           break;
         case 'lote':
@@ -624,23 +672,28 @@ export class AppReg360 extends LitElement {
           if (this.rota.id) {
             this.abaDetalhe = 'propostas';
             const ehLote = this.rota.view === 'lote';
-            this.detalhe = ehLote
+            const detalhe = ehLote
               ? await reg360Api.lote(this.rota.id)
               : await reg360Api.unidade(this.rota.id);
-            await this._carregarPropostas(this.rota.view, this.rota.id);
+            if (!this._geracaoValida(g)) return;
+            this.detalhe = detalhe;
+            await this._carregarPropostas(this.rota.view, this.rota.id, g);
+            if (!this._geracaoValida(g)) return;
             // Unidade também tem ocupantes: `imovel_pessoas` liga a QUALQUER
             // subtipo de imóvel. Antes isto era gateado em `ehLote`, e a tela
             // afirmava "nenhum morador vinculado" sem nunca ter perguntado.
-            await this._carregarOcupantesDoImovel(this.rota.view, this.rota.id);
-            void this._carregarMatriculas();
-            void this._carregarAcoes();
-            void this._carregarTransacoes();
+            await this._carregarOcupantesDoImovel(this.rota.view, this.rota.id, g);
+            if (!this._geracaoValida(g)) return;
+            void this._carregarMatriculas(g);
+            void this._carregarAcoes(g);
+            void this._carregarTransacoes(g);
             // O contexto vem ANTES da cascata: sem o parcelamento resolvido não
             // se sabe o setor, e o elo de Setor da cadeia seria pulado — a
             // unidade não herdaria o preço-base que sempre existe lá.
-            await this._carregarContextoDoImovel();
-            void this._carregarDadosDoImovel();
-            this.vigente = await reg360Api.resolverVigente({
+            await this._carregarContextoDoImovel(g);
+            if (!this._geracaoValida(g)) return;
+            void this._carregarDadosDoImovel(g);
+            const vigente = await reg360Api.resolverVigente({
               nivel: this.rota.view,
               ref_id: this.rota.id,
               // `unidades` não tem coluna `lote_id`: o elo só existe quando a
@@ -651,13 +704,20 @@ export class AppReg360 extends LitElement {
               parcelamento_id: this.detalhe?.parcelamento_id ?? this.paiDoImovel.parcelamento?.id,
               setor_id: this.paiDoImovel.parcelamento?.setor_habitacional_id,
             });
+            if (!this._geracaoValida(g)) return;
+            this.vigente = vigente;
           }
           break;
         case 'proposta':
-          if (this.rota.id) this.detalhe = await reg360Api.buscarProposta(this.rota.id);
+          if (this.rota.id) {
+            const proposta = await reg360Api.buscarProposta(this.rota.id);
+            if (!this._geracaoValida(g)) return;
+            this.detalhe = proposta;
+          }
           break;
       }
     } catch (e: any) {
+      if (!this._geracaoValida(g)) return;
       // A carga da home é sequencial: setores primeiro, parcelamentos depois.
       // Se o SEGUNDO falha, `setores` já está populado e a tela renderiza os
       // cards — cada um contando sobre uma lista vazia. Sem esta marca, eles
@@ -673,7 +733,9 @@ export class AppReg360 extends LitElement {
       }
       this._registrarFalha(e, 'Falha ao carregar dados');
     } finally {
-      this.carregando = false;
+      // Resposta de rota anterior não pode apagar o `carregando` de uma
+      // navegação mais nova ainda em voo — só a própria geração se desliga.
+      if (this._geracaoValida(g)) this.carregando = false;
     }
   }
 
@@ -729,15 +791,17 @@ export class AppReg360 extends LitElement {
    * parcelamento: ou se varre tudo uma vez e memoriza, ou se faz uma requisição
    * por lote. A varredura ganha, e o cache a paga uma vez por sessão.
    */
-  private async _carregarMatriculas() {
+  private async _carregarMatriculas(geracao = this.geracaoCarga) {
     // O cache é por SESSÃO, não por imóvel: uma vez lido, continua lido.
     if (this.matriculasPorId.size > 0) { this.leituraMatriculas = 'concluida'; return; }
     this.leituraMatriculas = 'correndo';
     try {
       const mats = await reg360Api.matriculas();
+      if (!this._geracaoValida(geracao)) return;
       this.matriculasPorId = new Map(mats.map((m: any) => [Number(m.id), m]));
       this.leituraMatriculas = 'concluida';
     } catch (e: any) {
+      if (!this._geracaoValida(geracao)) return;
       // Degrada a coluna Matrícula, não a tela. A marca de falha existe porque
       // `rotuloReferencia` sozinho devolve `…` — e `…` eterno, sem nada que
       // diga o motivo, é limbo: o usuário não sabe se espera ou se recarrega.
@@ -752,7 +816,7 @@ export class AppReg360 extends LitElement {
    * carrega também as unidades dela — que é onde `unidades` de fato vive no
    * Núcleo (`incorporacao_id` é NOT NULL, e é o único filtro válido).
    */
-  private async _carregarContextoDoImovel() {
+  private async _carregarContextoDoImovel(geracao = this.geracaoCarga) {
     const d = this.detalhe;
     if (!d) {
       // `_carregar()` já pôs 'correndo' antes deste `await` rodar. Sem fechar
@@ -769,13 +833,16 @@ export class AppReg360 extends LitElement {
     this.loteDaUnidade = null;
     try {
       if (d.parcelamento_id) {
-        this.paiDoImovel = { ...this.paiDoImovel, parcelamento: await reg360Api.parcelamento(Number(d.parcelamento_id)) };
+        const parcelamento = await reg360Api.parcelamento(Number(d.parcelamento_id));
+        if (!this._geracaoValida(geracao)) return;
+        this.paiDoImovel = { ...this.paiDoImovel, parcelamento };
       }
       if (d.incorporacao_id) {
         const [inc, unidades] = await Promise.all([
           reg360Api.incorporacao(Number(d.incorporacao_id)),
           reg360Api.unidades({ incorporacao_id: Number(d.incorporacao_id) }),
         ]);
+        if (!this._geracaoValida(geracao)) return;
         this.paiDoImovel = { ...this.paiDoImovel, incorporacao: inc };
         // A própria unidade aberta não entra na lista de irmãs.
         this.unidadesDoLote = unidades.filter((u: any) => Number(u.id) !== Number(d.id));
@@ -786,18 +853,19 @@ export class AppReg360 extends LitElement {
       // cima é pelos lotes da incorporação.
       if (!d.parcelamento_id && d.incorporacao_id) {
         const lotes = await reg360Api.lotes({ incorporacao_id: Number(d.incorporacao_id) });
+        if (!this._geracaoValida(geracao)) return;
         const pai = paiDaUnidade(lotes);
         this.loteDaUnidade = pai.loteId;
         this.avisoHerancaUnidade = avisoDeHeranca(pai);
         if (pai.parcelamentoId) {
-          this.paiDoImovel = {
-            ...this.paiDoImovel,
-            parcelamento: await reg360Api.parcelamento(pai.parcelamentoId),
-          };
+          const parcelamento = await reg360Api.parcelamento(pai.parcelamentoId);
+          if (!this._geracaoValida(geracao)) return;
+          this.paiDoImovel = { ...this.paiDoImovel, parcelamento };
         }
       }
       this.leituraContextoDoImovel = 'concluida';
     } catch (e: any) {
+      if (!this._geracaoValida(geracao)) return;
       // Contexto ausente NÃO degrada só rótulo: `paiDoImovel` vazio faz
       // `resolverVigente` ser chamado sem `parcelamento_id` e sem `setor_id`,
       // a cascata pula os elos de cima, e a tela apresenta um preço menor (ou
@@ -899,14 +967,17 @@ export class AppReg360 extends LitElement {
     }
   }
 
-  private async _carregarDadosDoImovel() {
+  private async _carregarDadosDoImovel(geracao = this.geracaoCarga) {
     this.dadosDoImovel = {};
     if (!this.rota.id) return;
     this.leituraDadosDoImovel = 'correndo';
     try {
-      this.dadosDoImovel = await reg360Api.imovelDados(this.rota.view, this.rota.id) || {};
+      const dados = await reg360Api.imovelDados(this.rota.view, this.rota.id) || {};
+      if (!this._geracaoValida(geracao)) return;
+      this.dadosDoImovel = dados;
       this.leituraDadosDoImovel = 'concluida';
     } catch (e: any) {
+      if (!this._geracaoValida(geracao)) return;
       // `{}` é a resposta legítima de imóvel nunca editado — a maioria. Por
       // isso a falha precisa de marca própria: sem ela, o badge "Quitado" some
       // de um imóvel quitado e a tela oferece gravar um contrato que existe.
@@ -1187,7 +1258,7 @@ export class AppReg360 extends LitElement {
    * sem imóvel **não** aparece aqui — ela vive na tela da pessoa, que a #33
    * ainda vai criar.
    */
-  private async _carregarAcoes() {
+  private async _carregarAcoes(geracao = this.geracaoCarga) {
     this.acoes = [];
     if (!this.rota.id) { this.leituraAcoes = 'concluida'; return; }
     this.carregandoAcoes = true;
@@ -1197,9 +1268,11 @@ export class AppReg360 extends LitElement {
         imovel_id: this.rota.id,
         imovel_tipo: this.rota.view,
       });
+      if (!this._geracaoValida(geracao)) return;
       this.acoes = r?.dados || [];
       this.leituraAcoes = 'concluida';
     } catch (e: any) {
+      if (!this._geracaoValida(geracao)) return;
       // `carregandoAcoes` cobria só a janela. No catch ele volta a `false` e a
       // lista fica vazia — e a aba passava a afirmar "Nenhuma ação neste
       // imóvel", que é o oposto do que se sabe.
@@ -1218,16 +1291,18 @@ export class AppReg360 extends LitElement {
    * as ações em que a pessoa é parte, inclusive as que não têm imóvel nenhum
    * vinculado: são exatamente as que a aba do lote não tem como mostrar.
    */
-  private async _carregarAcoesDaPessoa() {
+  private async _carregarAcoesDaPessoa(geracao = this.geracaoCarga) {
     this.acoesDaPessoa = [];
     if (!this.rota.id) { this.leituraAcoesDaPessoa = 'concluida'; return; }
     this.carregandoAcoesDaPessoa = true;
     this.leituraAcoesDaPessoa = 'correndo';
     try {
       const r = await reg360Api.listarAcoes({ pessoa_id: this.rota.id });
+      if (!this._geracaoValida(geracao)) return;
       this.acoesDaPessoa = r?.dados || [];
       this.leituraAcoesDaPessoa = 'concluida';
     } catch (e: any) {
+      if (!this._geracaoValida(geracao)) return;
       this.leituraAcoesDaPessoa = 'falhou';
       this._registrarFalha(e, 'Falha ao carregar as ações desta pessoa');
     } finally {
@@ -1245,7 +1320,7 @@ export class AppReg360 extends LitElement {
    * caminho de erro sim. Com a integração ligada e a rede caindo, sem a marca
    * a aba diria "Nenhuma transação neste imóvel" e as três datas sairiam `—`.
    */
-  private async _carregarTransacoes() {
+  private async _carregarTransacoes(geracao = this.geracaoCarga) {
     this.transacoes = [];
     if (!this.rota.id) { this.leituraTransacoes = 'concluida'; return; }
     this.leituraTransacoes = 'correndo';
@@ -1253,9 +1328,13 @@ export class AppReg360 extends LitElement {
       // O estado vem do servidor, não da constante compilada: ligar a
       // integração no backend precisa valer para bundle já em cache.
       await garantirEstado();
-      this.transacoes = await transacoesDoImovel(this.rota.view, this.rota.id);
+      if (!this._geracaoValida(geracao)) return;
+      const transacoes = await transacoesDoImovel(this.rota.view, this.rota.id);
+      if (!this._geracaoValida(geracao)) return;
+      this.transacoes = transacoes;
       this.leituraTransacoes = 'concluida';
     } catch (e: any) {
+      if (!this._geracaoValida(geracao)) return;
       this.leituraTransacoes = 'falhou';
       this._registrarFalha(e, 'Falha ao carregar as transações');
     }
@@ -1627,7 +1706,7 @@ export class AppReg360 extends LitElement {
    * Ocupantes dos lotes visíveis. Uma requisição por lote (o Núcleo não expõe
    * `imovel_pessoas` em lote), com janela de simultâneos e cache por lote.
    */
-  private async _carregarPessoasDaPagina(lotes?: any[]) {
+  private async _carregarPessoasDaPagina(lotes?: any[], geracao = this.geracaoCarga) {
     const alvo = (lotes ?? this._lotesDaPagina).filter((l) => !this.pessoasPorLote.has(Number(l.id)));
     if (alvo.length === 0) return;
     this.carregandoPessoas = true;
@@ -1644,6 +1723,7 @@ export class AppReg360 extends LitElement {
           return [Number(l.id), []];
         }
       });
+      if (!this._geracaoValida(geracao)) return;
       const mapa = new Map(this.pessoasPorLote);
       for (const [id, pessoas] of resultados) mapa.set(id, pessoas);
       this.pessoasPorLote = mapa;
@@ -1652,6 +1732,7 @@ export class AppReg360 extends LitElement {
       for (const id of falhados) falhas.add(id);
       this.lotesComFalhaDePessoas = falhas;
     } catch (e: any) {
+      if (!this._geracaoValida(geracao)) return;
       // O `catch` por item (dentro do `mapaComLimite`) cobre o lote que falha
       // sozinho; este cobre a falha CATASTRÓFICA — o próprio `mapaComLimite`
       // rejeitando, ou a montagem do alvo — não item por item, porque aquele
@@ -1678,14 +1759,16 @@ export class AppReg360 extends LitElement {
    * requisição a cada render), e sem a marca isso viraria "nenhum morador"
    * — a afirmação que este método existe para não fazer.
    */
-  private async _carregarOcupantesDoImovel(tipo: string, id: number) {
+  private async _carregarOcupantesDoImovel(tipo: string, id: number, geracao = this.geracaoCarga) {
     const chave = Number(id);
     const falhas = new Set(this.lotesComFalhaDePessoas);
     try {
       const pessoas = await reg360Api.pessoasDoImovel(tipo === 'unidade' ? 'unidade' : 'lote', chave);
+      if (!this._geracaoValida(geracao)) return;
       this.pessoasPorLote = new Map([[chave, pessoas]]);
       falhas.delete(chave);
     } catch {
+      if (!this._geracaoValida(geracao)) return;
       this.pessoasPorLote = new Map([[chave, []]]);
       falhas.add(chave);
     } finally {
@@ -1722,7 +1805,7 @@ export class AppReg360 extends LitElement {
    * Propostas e preços por imóvel — as duas bases que faltam para o VGV.
    * Cada uma é uma varredura só, memorizada; o resto é conta no cliente.
    */
-  private async _carregarBasesDoVgv() {
+  private async _carregarBasesDoVgv(geracao = this.geracaoCarga) {
     if (this.basesDoVgvCarregadas || this.carregandoVgv) return;
     this.carregandoVgv = true;
     try {
@@ -1730,12 +1813,14 @@ export class AppReg360 extends LitElement {
         reg360Api.listarTodasPropostas(),
         reg360Api.listarImovelDados('lote'),
       ]);
+      if (!this._geracaoValida(geracao)) return;
       this.vigentesPorAlvo = indexarPropostas(propostas, hoje());
       this.precosPorImovel = new Map(
         (precos?.dados || []).map((d: any) => [chaveImovel(d.imovel_id, d.imovel_tipo), d]),
       );
       this.basesDoVgvCarregadas = true;
     } catch (e: any) {
+      if (!this._geracaoValida(geracao)) return;
       this._registrarFalha(e, 'Falha ao carregar as bases de preço');
     } finally {
       this.carregandoVgv = false;
@@ -1812,12 +1897,15 @@ export class AppReg360 extends LitElement {
     return { quantidade, area };
   }
 
-  private async _carregarPropostas(nivel: string, refId: number) {
+  private async _carregarPropostas(nivel: string, refId: number, geracao = this.geracaoCarga) {
     this.leituraPropostas = 'correndo';
     try {
-      this.propostas = (await reg360Api.listarPropostas({ nivel, ref_id: refId })).dados || [];
+      const propostas = (await reg360Api.listarPropostas({ nivel, ref_id: refId })).dados || [];
+      if (!this._geracaoValida(geracao)) return;
+      this.propostas = propostas;
       this.leituraPropostas = 'concluida';
     } catch (e: any) {
+      if (!this._geracaoValida(geracao)) return;
       // Antes isto subia para o `catch` do `_carregar`, que marca `cargaFalhou`
       // e interrompe o resto da carga do imóvel. Aqui a falha é da lista, fica
       // na lista, e para de virar "Nenhuma proposta neste nível".
@@ -2034,12 +2122,14 @@ export class AppReg360 extends LitElement {
    * cache. Sem esta leitura o detalhe do Setor não teria como distinguir
    * "este setor não tem parcelamento" de "a instância não tem nenhum".
    */
-  private async _carregarOrfaosDeSetor(todos?: any[]) {
+  private async _carregarOrfaosDeSetor(todos?: any[], geracao = this.geracaoCarga) {
     try {
       const lista = todos ?? (await reg360Api.parcelamentos());
+      if (!this._geracaoValida(geracao)) return;
       this.totalParcelamentosInstancia = lista.length;
       this.parcelamentosSemSetor = lista.filter((p: any) => !p.setor_habitacional_id);
     } catch {
+      if (!this._geracaoValida(geracao)) return;
       // Não derruba a tela: sem esta leitura a app apenas deixa de AFIRMAR
       // sobre órfãos, que é melhor que afirmar errado.
       this.totalParcelamentosInstancia = null;
