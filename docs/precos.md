@@ -90,9 +90,11 @@ Os descontos são acumulativos: o de lote grande soma-se ao da forma de pagament
 
 A função está escrita e testada, mas **a tela ainda não a chama** — e agora o motivo é mais preciso que "o catálogo não existe".
 
-O catálogo existe: `comum/catalogos.ts`, e o único uso conhecido já tem família — **`CSIIR`** (*Comercial, Serviços, Industrial, Institucional e Residencial*) é uso misto, e vai para **`comercial_misto`**.
+O catálogo existe e está **fechado** (`comum/catalogos.ts`, #22): seis valores de Uso, todos com família conhecida. **`CSIIR`** (*Comercial, Serviços, Industrial, Institucional e Residencial*) e **`INST`** (*Institucional*) são `comercial_misto`; **`RE`**, **`RE 2`**, **`RE 3`** (*Residencial Exclusivo*, *2*, *3*) e **`RO`** (*Residencial Obrigatório*) são `residencial`.
 
-Que a sigla termine em "Residencial" não a torna residencial: uso misto admite residência entre outros usos, e o piso aplicável é o do conjunto. A família foi respondida por quem define o piso, não derivada da leitura da sigla — e é assim que tem de ser, porque a sigla sugere o contrário.
+Que `CSIIR` termine em "Residencial" não o torna residencial: uso misto admite residência entre outros usos, e o piso aplicável é o do conjunto. Cada família foi respondida por quem define o piso, não derivada da leitura da sigla — e é assim que tem de ser, porque a sigla de `CSIIR` sugere o contrário.
+
+**Tipo de Lote não é campo próprio do legado** — é sempre `Residencial` ou `Comercial`, derivado do Uso (`tipoLoteDeUso()` em `comum/catalogos.ts`, mesma tradução de família que `familiaDoUso()` já faz).
 
 O que ainda falta para ligar a checagem na tela é o **dado**: `uso` não tem onde morar (#19/#20/#21 paradas, porque o destino é o Lote do Núcleo e o campo ainda não chegou lá). Sem `uso` no imóvel, não há o que passar para `familiaDoUso()`.
 
