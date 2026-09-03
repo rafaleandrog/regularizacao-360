@@ -106,9 +106,12 @@ export interface EntradaCatalogo {
  * família de cada entrada não foi derivada da leitura da sigla — foi
  * respondida por quem define o piso, a mesma régua que já valia para `CSIIR`
  * antes desta lista fechar: `RE`, `RE 2`, `RE 3` e `RO` são uso
- * exclusivamente residencial (`residencial`); `INST` é uso institucional, que
- * o Ricardo já classifica dentro de `CSIIR` (o "I" da sigla) — sem uso misto
- * nem residência prevista, cai em `comercial_misto` pela mesma régua.
+ * exclusivamente residencial (`residencial`). `INST` (institucional) não foi
+ * classificado ao pé da letra pelo Ricardo — é dedução a partir da própria
+ * regra que ele deu: só há dois baldes possíveis (Residencial ou Comercial),
+ * `RE`/`RE 2`/`RE 3`/`RO` batem residencial pelo nome, e o que sobra —
+ * `CSIIR` e `INST` — cai em `comercial_misto` por eliminação, não por leitura
+ * da sigla.
  *
  * A coluna continua **texto livre** (ver o comentário do arquivo): a lista
  * fechar hoje não impede um valor novo de aparecer numa importação futura, e
@@ -132,7 +135,7 @@ export const CATALOGO_USO: readonly EntradaCatalogo[] = [
     descricao: 'Institucional',
     cor: 'info',
     familia: 'comercial_misto',
-    origem: 'Significado e família respondidos pelo Ricardo na issue #22 (2026-09-03) — mesma família de CSIIR, que já inclui institucional.',
+    origem: 'Significado respondido pelo Ricardo na issue #22 (2026-09-03). Família (comercial_misto) é dedução por eliminação a partir da regra dele — não resposta literal para este valor específico.',
   },
   {
     valor: 'RE',

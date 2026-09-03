@@ -58,8 +58,9 @@ describe('catálogo de Uso — texto livre com sugestões, não enum', () => {
     assert.equal(familiaDoUso('RE 2'), 'residencial');
     assert.equal(familiaDoUso('RE 3'), 'residencial');
     assert.equal(familiaDoUso('RO'), 'residencial');
-    // INST cai na mesma família de CSIIR — o Ricardo já classifica
-    // institucional dentro do "I" de CSIIR.
+    // INST não foi classificado ao pé da letra pelo Ricardo — é dedução por
+    // eliminação a partir da regra dele (só há dois baldes possíveis, e
+    // RE/RE 2/RE 3/RO já bateram residencial pelo nome). Ver comum/catalogos.ts.
     assert.equal(familiaDoUso('INST'), 'comercial_misto');
   });
 
@@ -74,6 +75,8 @@ describe('catálogo de Uso — texto livre com sugestões, não enum', () => {
     assert.ok(entradaDeTipoLote('Residencial'));
     assert.ok(entradaDeTipoLote('Comercial'));
     assert.equal(entradaDeTipoLote('qualquer'), null);
+    assert.equal(entradaDeTipoLote('Residencial')?.familia, 'residencial');
+    assert.equal(entradaDeTipoLote('Comercial')?.familia, 'comercial_misto');
   });
 
   describe('tipoLoteDeUso — a derivação em si', () => {
@@ -82,6 +85,12 @@ describe('catálogo de Uso — texto livre com sugestões, não enum', () => {
       assert.equal(tipoLoteDeUso('RE 2'), 'Residencial');
       assert.equal(tipoLoteDeUso('RE 3'), 'Residencial');
       assert.equal(tipoLoteDeUso('RO'), 'Residencial');
+    });
+
+    // Herdado de entradaDeUso()/familiaDoUso(): o mesmo .trim() já confirmado
+    // para entradaDeUso deve valer aqui, já que tipoLoteDeUso é construída em cima.
+    test('espaço ao redor não muda a derivação — herda o .trim() de entradaDeUso', () => {
+      assert.equal(tipoLoteDeUso('  RE  '), 'Residencial');
     });
 
     test('uso comercial_misto vira Tipo de Lote Comercial', () => {
@@ -124,6 +133,16 @@ describe('rótulo e cor — desconhecido aparece, não some', () => {
   test('cor de desconhecido é neutra — colorir por chute é vestir o badge do outro', () => {
     assert.equal(corDeUso('CSIIR'), 'info');
     assert.equal(corDeUso('INVENTADO'), 'padrao');
+  });
+
+  test('cor das sete entradas novas — trava contra troca silenciosa de badge', () => {
+    assert.equal(corDeUso('INST'), 'info');
+    assert.equal(corDeUso('RE'), 'sucesso');
+    assert.equal(corDeUso('RE 2'), 'sucesso');
+    assert.equal(corDeUso('RE 3'), 'sucesso');
+    assert.equal(corDeUso('RO'), 'sucesso');
+    assert.equal(entradaDeTipoLote('Residencial')?.cor, 'sucesso');
+    assert.equal(entradaDeTipoLote('Comercial')?.cor, 'info');
   });
 
   test('a comparação é exata, nunca por substring', () => {
