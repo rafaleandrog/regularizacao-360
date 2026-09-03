@@ -587,7 +587,7 @@ export class AppReg360 extends LitElement {
           break;
         }
         case 'lotes':
-          await this._carregarLotesGlobais(1);
+          await this._carregarLotesGlobais(1, g);
           break;
         case 'moradores': {
           // Parcelamentos vêm junto porque o seletor de recorte do índice sai
@@ -595,7 +595,7 @@ export class AppReg360 extends LitElement {
           const parcelamentos = await reg360Api.parcelamentos();
           if (!this._geracaoValida(g)) return;
           this.parcelamentos = parcelamentos;
-          await this._carregarMoradores(1);
+          await this._carregarMoradores(1, g);
           break;
         }
         case 'morador':
@@ -1064,7 +1064,7 @@ export class AppReg360 extends LitElement {
    * cobre nome e CPF, que são os dois campos que importam aqui. O preço é o
    * conhecido: ILIKE não cruza acento, então `jose` não acha `José`.
    */
-  private async _carregarMoradores(pagina: number) {
+  private async _carregarMoradores(pagina: number, geracao = this.geracaoCarga) {
     this.carregando = true;
     this.leituraMoradores = 'correndo';
     try {
@@ -1072,6 +1072,10 @@ export class AppReg360 extends LitElement {
         { busca: this.buscaMorador.trim() || undefined, tipo: 'fisica' },
         pagina,
       );
+      // Navegação mais nova pode ter descartado esta chamada antes dela
+      // voltar — sem a guarda, a resposta velha sobrescreveria a tabela
+      // que a navegação seguinte já preencheu.
+      if (!this._geracaoValida(geracao)) return;
       this.moradores = r?.dados || [];
       this.moradoresPagina = Number(r?.pagina) || pagina;
       this.moradoresPaginas = Number(r?.paginas) || 1;
@@ -1079,6 +1083,7 @@ export class AppReg360 extends LitElement {
       this.leituraMoradores = 'concluida';
       void this._carregarContatos(this.moradores);
     } catch (e: any) {
+      if (!this._geracaoValida(geracao)) return;
       // Nada é resetado de propósito — a página anterior continua na tela em
       // vez de sumir. O que muda é que ela para de se apresentar como o
       // resultado da busca nova: sem esta marca, `moradoresTotal` de uma
@@ -1767,11 +1772,11 @@ export class AppReg360 extends LitElement {
       if (!this._geracaoValida(geracao)) return;
       this.pessoasPorLote = new Map([[chave, pessoas]]);
       falhas.delete(chave);
+      this.lotesComFalhaDePessoas = falhas;
     } catch {
       if (!this._geracaoValida(geracao)) return;
       this.pessoasPorLote = new Map([[chave, []]]);
       falhas.add(chave);
-    } finally {
       this.lotesComFalhaDePessoas = falhas;
     }
   }
@@ -2339,7 +2344,7 @@ export class AppReg360 extends LitElement {
    * rua) e devolve `total`, então não há por que varrer ~6.200 registros para
    * mostrar 25 linhas.
    */
-  private async _carregarLotesGlobais(pagina: number) {
+  private async _carregarLotesGlobais(pagina: number, geracao = this.geracaoCarga) {
     this.carregando = true;
     this.leituraLotesGlobais = 'correndo';
     try {
@@ -2348,11 +2353,16 @@ export class AppReg360 extends LitElement {
         pagina,
         LOTES_GLOBAIS_POR_PAGINA,
       );
+      // Navegação mais nova pode ter descartado esta chamada antes dela
+      // voltar — sem a guarda, a resposta velha sobrescreveria a tabela
+      // que a navegação seguinte já preencheu.
+      if (!this._geracaoValida(geracao)) return;
       this.lotesGlobais = resp.dados ?? [];
       this.totalLotesGlobais = Number(resp.total ?? this.lotesGlobais.length);
       this.paginaLotesGlobais = pagina;
       this.leituraLotesGlobais = 'concluida';
     } catch (e: any) {
+      if (!this._geracaoValida(geracao)) return;
       // A lista anterior fica na tela de propósito — apagá-la perderia o que
       // já tinha sido lido. Mas ela é de OUTRO termo de busca e de OUTRA
       // página, e sem esta marca a tabela a apresentava como o resultado da
