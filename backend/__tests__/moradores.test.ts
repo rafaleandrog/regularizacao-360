@@ -382,27 +382,40 @@ describe('decidirPedidoDeIndice — sem varredura em voo custa uma requisição 
   });
 });
 
-describe('proximoPedidoDeIndice — só o pedido mais recente sobrevive à fila', () => {
+describe('proximoPedidoDeIndice — pendente sempre roda; só a ausência de pendente é "nada a fazer"', () => {
   test('nada pendente → nada a fazer', () => {
-    assert.equal(proximoPedidoDeIndice({ pendente: undefined, indexado: 46 }), undefined);
+    assert.equal(proximoPedidoDeIndice({ pendente: undefined }), undefined);
   });
 
   test('pendente diferente do que acabou de indexar → roda ele', () => {
-    assert.equal(proximoPedidoDeIndice({ pendente: 47, indexado: 46 }), 47);
+    assert.equal(proximoPedidoDeIndice({ pendente: 47 }), 47);
   });
 
   // O pendente de "limpar" (null) é um pedido válido, não "vazio" — tem que
   // rodar mesmo que o índice atual já tenha ALGO, senão o pedido de limpar
   // (que o usuário fez por último) é o que desaparece.
   test('pendente de limpar (null) roda quando o índice atual não é null', () => {
-    assert.equal(proximoPedidoDeIndice({ pendente: null, indexado: 46 }), null);
+    assert.equal(proximoPedidoDeIndice({ pendente: null }), null);
   });
 
-  // Evita repetir ~100 requisições para reproduzir um número que já está em
-  // memória: se o que ficou pendente é exatamente o que a varredura que
-  // acabou de terminar já entregou, não há nada nesse pedido que ainda falte.
-  test('pendente igual ao que acabou de ser indexado não roda de novo', () => {
-    assert.equal(proximoPedidoDeIndice({ pendente: 46, indexado: 46 }), undefined);
-    assert.equal(proximoPedidoDeIndice({ pendente: null, indexado: null }), undefined);
+  // O defeito que existia: um atalho descartava o pendente quando ele
+  // "batia" com o indexado. Cenário real — usuário pede para limpar
+  // (`pendente: null`) enquanto uma varredura está em voo, e ela FALHA: o
+  // `catch` de `_executarIndexacao` zera `indexado` para `null`, ficando
+  // "igual" ao pendente, e o atalho descartava o "limpar" como se não
+  // houvesse nada a fazer. Não é "nada a fazer" — é um pedido válido que
+  // ainda não rodou.
+  test('limpar enfileirado durante varredura que falhou roda — não é "nada a fazer"', () => {
+    assert.equal(proximoPedidoDeIndice({ pendente: null }), null);
+    assert.notEqual(proximoPedidoDeIndice({ pendente: null }), undefined);
+  });
+
+  // Outro cenário que o atalho quebrava: usuário clica "tentar de novo" no
+  // MESMO parcelamento (46) enquanto uma varredura dele já está em voo, e ela
+  // termina com falha parcial — `indexado` também fica 46. O atalho via os
+  // dois "iguais" e descartava o retry silenciosamente, mesmo o usuário tendo
+  // pedido de novo explicitamente.
+  test('tentar de novo o mesmo parcelamento roda de novo — retry após falha parcial', () => {
+    assert.equal(proximoPedidoDeIndice({ pendente: 46 }), 46);
   });
 });

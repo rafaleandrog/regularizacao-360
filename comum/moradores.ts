@@ -305,16 +305,21 @@ export function decidirPedidoDeIndice(e: { emVoo: boolean; pedido: number | null
  * (podendo ser `null`, que é o pedido de limpar) ou `undefined` quando não há
  * nada a fazer.
  *
- * Dois jeitos de "nada a fazer": nenhum pedido ficou pendente (`pendente`
- * `undefined`), ou o pendente já É o resultado que acabou de chegar — rodar de
- * novo repetiria ~100 requisições para reproduzir um número que já está em
- * memória.
+ * Só existe UM jeito de "nada a fazer": nenhum pedido ficou pendente
+ * (`pendente` `undefined`). Não há atalho de "pendente igual ao que acabou de
+ * ser indexado" — havia, e ele descartava a escolha do usuário em dois
+ * cenários reais: (1) o usuário pede para limpar (`pendente: null`) enquanto
+ * uma varredura está em voo, e ela FALHA — o `catch` de `_executarIndexacao`
+ * zera `indexado` para `null`, ficando "igual" ao pendente, e o "limpar"
+ * desaparecia; (2) o usuário clica "tentar de novo" no mesmo parcelamento
+ * (`pendente` igual ao `indexado` anterior) depois de uma falha parcial — o
+ * retry do mesmo id era descartado como se nada tivesse sido pedido. Rodar o
+ * pendente sempre custa, no pior caso, uma varredura que o usuário pediu
+ * explicitamente — bem mais barato que perder o pedido.
  */
 export function proximoPedidoDeIndice(e: {
   pendente: number | null | undefined;
-  indexado: number | null;
 }): number | null | undefined {
   if (e?.pendente === undefined) return undefined;
-  if (e.pendente === e.indexado) return undefined;
   return e.pendente;
 }

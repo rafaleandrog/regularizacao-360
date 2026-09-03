@@ -362,13 +362,15 @@ export class AppReg360 extends LitElement {
    */
   @state() private parcelamentoPedido: number | null = null;
   @state() private indiceFalhou = false;
-  /** Cresce a cada pedido; resultado de pedido antigo é descartado, não a escolha nova. */
-  private geracaoIndice = 0;
   @state() private indexando = false;
   /**
    * Pedido guardado enquanto uma varredura está em voo — `undefined` quando
    * não há nenhum. `null` é um pedido válido (o de limpar o índice), por isso
    * não dá para usar `null` como "vazio" aqui; ver `proximoPedidoDeIndice`.
+   * A única guarda de concorrência é a fila em si — no máximo uma varredura
+   * em voo por vez (`decidirPedidoDeIndice` enfileira o resto) — não há
+   * contador de geração: com uma única varredura possível, não existe
+   * "resultado de pedido antigo" para descartar.
    */
   private pedidoDeIndicePendente: number | null | undefined = undefined;
   /**
@@ -1057,14 +1059,13 @@ export class AppReg360 extends LitElement {
 
   /** A varredura em si — só roda uma de cada vez; ver `_indexarParcelamento`. */
   private async _executarIndexacao(parcelamentoId: number | null) {
-    const geracao = ++this.geracaoIndice;
     if (parcelamentoId === null) {
       this.parcelamentoIndexado = null;
       this.imoveisPorPessoa = new Map();
       this.lotesQueFalharam = 0;
       this.indiceFalhou = false;
       this.indexando = false;
-      this._rodarPendenteDeIndiceSeHouver(geracao);
+      this._rodarPendenteDeIndiceSeHouver();
       return;
     }
     this.indexando = true;
@@ -1081,12 +1082,10 @@ export class AppReg360 extends LitElement {
           return { imovel: l, vinculos: [], falhou: true };
         }
       });
-      if (geracao !== this.geracaoIndice) return; // pedido mais novo já venceu
       this.lotesQueFalharam = pares.filter((r) => r.falhou).length;
       this.imoveisPorPessoa = indexarPorPessoa(pares.filter((r) => !r.falhou));
       this.parcelamentoIndexado = parcelamentoId;
     } catch (e: any) {
-      if (geracao !== this.geracaoIndice) return;
       // Falha inteira: o índice em memória é de OUTRO parcelamento (ou de
       // nenhum) e não pode passar por este. Zera o resultado, mantém o pedido
       // — é a divergência entre os dois que a tela mostra como "falhou".
@@ -1096,21 +1095,19 @@ export class AppReg360 extends LitElement {
       this.indiceFalhou = true;
       this._registrarFalha(e, 'Falha ao indexar o parcelamento');
     } finally {
-      if (geracao === this.geracaoIndice) this.indexando = false;
+      this.indexando = false;
     }
-    this._rodarPendenteDeIndiceSeHouver(geracao);
+    this._rodarPendenteDeIndiceSeHouver();
   }
 
   /**
    * Ao terminar uma varredura (sucesso ou falha), há pedido pendente? Roda
-   * agora — é o "enfileirar" de `_indexarParcelamento` sendo consumido.
+   * agora — é o "enfileirar" de `_indexarParcelamento` sendo consumido. Não
+   * há checagem de geração aqui: com no máximo uma varredura em voo, esta
+   * chamada é sempre a única pendente de resolver.
    */
-  private _rodarPendenteDeIndiceSeHouver(geracao: number) {
-    if (geracao !== this.geracaoIndice) return; // uma chamada mais nova já cuidou disto
-    const proximo = proximoPedidoDeIndice({
-      pendente: this.pedidoDeIndicePendente,
-      indexado: this.parcelamentoIndexado,
-    });
+  private _rodarPendenteDeIndiceSeHouver() {
+    const proximo = proximoPedidoDeIndice({ pendente: this.pedidoDeIndicePendente });
     this.pedidoDeIndicePendente = undefined;
     if (proximo !== undefined) void this._executarIndexacao(proximo);
   }
