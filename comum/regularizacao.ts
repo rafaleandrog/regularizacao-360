@@ -21,6 +21,9 @@
  */
 
 import { soData } from './cascata.js';
+import type { EstadoContagem } from './agregados.js';
+import { TEXTO_AUSENCIA } from './estado-lista.js';
+import { rotuloReferencia } from './referencias.js';
 
 export type FaseRegularizacao = 'irregular' | 'em_analise' | 'aprovado' | 'registrado';
 export type SituacaoRegistral = 'nenhuma' | 'caucionado' | 'prenotado';
@@ -129,6 +132,84 @@ export function badgeSituacaoRegistral(situacao: unknown): OpcaoRotulada {
 export function situacaoRegistralRelevante(situacao: unknown): boolean {
   const chave = String(situacao ?? '').trim().toLowerCase();
   return chave !== '' && chave !== 'nenhuma';
+}
+
+/**
+ * Texto da carga de `parcelamento_dados` nos estados sem dado; `null` em
+ * `concluida` — aí quem fala é o próprio valor lido, não um marcador de espera.
+ *
+ * Segue o mesmo padrão do aviso do filtro de quitação na tabela de lotes
+ * (carregando… / não carregou), endereçado ao registro de um parcelamento em
+ * vez de a uma lista — o padrão, não as frases.
+ */
+export const TEXTO_REGULARIZACAO_NAO_LIDA: Record<EstadoContagem, string | null> = {
+  correndo: 'Carregando os dados de regularização…',
+  falhou: 'Os dados de regularização não carregaram',
+  concluida: null,
+};
+
+/**
+ * Aviso sob o chip de fase ativo, para quando o filtro por fase **não está
+ * cortando** — porque `parcelamento_dados` ainda não foi lido por completo.
+ *
+ * Sem isto, escolher uma fase com a carga pendente mostra os 60 parcelamentos
+ * como se todos casassem com o filtro, calado — a mesma classe de defeito que
+ * o aviso de quitação já cobre para a lista de lotes.
+ */
+export function avisoFiltroFase(estado: EstadoContagem): string | null {
+  if (estado === 'correndo') {
+    return 'Carregando os dados de regularização — o filtro por fase ainda não está valendo.';
+  }
+  if (estado === 'falhou') {
+    return 'Os dados de regularização não carregaram, então o filtro por fase está sem efeito: a lista abaixo é a completa.';
+  }
+  return null;
+}
+
+/**
+ * Um campo de `parcelamento_dados` no detalhe do parcelamento: `…` enquanto a
+ * leitura não concluiu (correndo ou falhou), `—` só depois de concluída e o
+ * campo vir vazio.
+ *
+ * Existe porque o detalhe lia `regularizacaoPorParcelamento.get(id) || {}` e
+ * formatava o objeto vazio como se fosse o registro real — decreto, matrícula
+ * e as três áreas saíam `—` mesmo com a carga ainda correndo ou já falhada,
+ * uma afirmação sobre dado que não foi lido.
+ */
+export function textoDadoRegularizacao(
+  estado: EstadoContagem,
+  valor: unknown,
+  formatar: (v: unknown) => string = String,
+): string {
+  if (estado !== 'concluida') return TEXTO_AUSENCIA[estado];
+  if (valor === null || valor === undefined || valor === '') return '—';
+  return formatar(valor);
+}
+
+/**
+ * Rótulo da matrícula-mãe: só depois de `parcelamento_dados` lido é que
+ * `rotuloReferencia` pode falar — antes disso, mesmo um `matricula_id`
+ * presente não distingue "sem matrícula" de "carga que ainda não trouxe o
+ * `matricula_id`".
+ */
+export function rotuloMatriculaMae(
+  estado: EstadoContagem,
+  nome: string | null | undefined,
+  matriculaId: unknown,
+): string {
+  if (estado !== 'concluida') return TEXTO_AUSENCIA[estado];
+  return rotuloReferencia(nome, matriculaId);
+}
+
+/**
+ * Editar só é seguro com o registro lido: o form de "Editar regularização"
+ * nasce dos valores atuais (`atual.numero_decreto ?? ''` etc.), e com o mapa
+ * vazio por carga pendente ou falhada ele nasceria em branco — salvar
+ * gravaria por cima do decreto, da matrícula e das áreas que o parcelamento
+ * já tem.
+ */
+export function edicaoRegularizacaoLiberada(estado: EstadoContagem): boolean {
+  return estado === 'concluida';
 }
 
 /** Extrai apenas os campos editáveis de um objeto (whitelist). */

@@ -16,9 +16,17 @@ tipo:
 
 "Irregular" não é rótulo neutro: é afirmação sobre a situação jurídica de um empreendimento. Dizê-la em massa porque uma requisição falhou é o erro mais caro desta classe.
 
-Por isso `_faseDe` devolve `null` enquanto `regularizacaoLida` for falso, e o badge vira **`fase não lida`** (`BADGE_FASE_NAO_LIDA`), em cor neutra que não se confunde com nenhuma fase real — há teste garantindo isso.
+Por isso `_faseDe` devolve `null` enquanto `leituraRegularizacao` não for `concluida`, e o badge vira **`fase não lida`** (`BADGE_FASE_NAO_LIDA`), em cor neutra que não se confunde com nenhuma fase real — há teste garantindo isso.
 
 **O filtro por fase acompanha:** com a carga pendente, ele não corta. Filtrar sobre dado não lido devolveria lista vazia com a mensagem "nenhum parcelamento com esse filtro" — outra afirmação sem base.
+
+**O filtro que não corta agora avisa.** O PR #90 fez o filtro não cortar com dado não lido, mas não dizia isso: o usuário clicava em "Aprovado" e via os 60 parcelamentos como se todos fossem aprovados. O filtro de quitação na tabela de lotes já avisava; a assimetria era o defeito. Agora `avisoFiltroFase` diz, sob o chip ativo, que o filtro ainda não está valendo (carga correndo) ou que está sem efeito e a lista é a completa (carga falhou), com "Tentar de novo".
+
+**O detalhe do parcelamento tinha os mesmos consumidores desguardados.** O #90 guardou só a fase (`BADGE_FASE_NAO_LIDA`); Nº Decreto, Matrícula-mãe e as três áreas (poligonal, viário, servidão) continuavam saindo de `regularizacaoPorParcelamento.get(id) || {}` — e `—` para a Matrícula-mãe, por `comum/referencias.ts`, significa "realmente não tem". Agora `textoDadoRegularizacao` e `rotuloMatriculaMae` só dizem `—` com a leitura concluída; antes disso é `…`.
+
+**Editar só com o registro lido.** O form de regularização nasce dos valores atuais; com o mapa não lido nascia de `{}`, e salvar apagaria decreto, matrícula, áreas e datas de um parcelamento que os tem. `edicaoRegularizacaoLiberada` segura o botão até a leitura concluir — botão que grava por cima do que não leu não entra.
+
+**A leitura tem três estados, não dois.** `regularizacaoLida` era booleano: falha e "ainda correndo" eram o mesmo `false`, sem retry. Agora é `leituraRegularizacao: EstadoContagem`, com `TEXTO_REGULARIZACAO_NAO_LIDA` para os dois estados sem dado. E a tela `/parcelamentos` passou a disparar a carga — antes só a home e o detalhe disparavam, e quem abria a lista direto via "fase não lida" para sempre. E há **uma requisição em voo por vez**: três telas disparam a carga (home, lista e detalhe), e navegar entre elas antes de a primeira resolver abria uma segunda — cuja falha tardia escrevia `falhou` por cima de `concluida`, escondendo "Editar regularização" sobre um mapa já correto. A segunda chamada agora reaproveita a promise da primeira.
 
 **A própria lista de Parcelamentos tinha o defeito gêmeo, um nível abaixo.** O parágrafo acima cobre `regularizacaoLida` — o mapa de fase; mas a lista em si (a que aparece quando `filtrados.length === 0`) ainda dizia "Nenhum parcelamento" / "Nenhum parcelamento com esse filtro" também quando o `_carregar()` da home **falhava**, sem checar `cargaFalhou`. Era o mesmo defeito das outras seis listas do app (ver [README.md](README) § "Nenhum X" é afirmação), só que nela ninguém tinha reparado na primeira leva — a revisão do PR achou depois. Agora ela passa por `estadoDaLista` (`comum/estado-lista.ts`) como as demais, e a mensagem de falha vem separada da de "zero resultados de verdade".
 
