@@ -463,15 +463,34 @@ export async function importar(linhas, rel, colunas = COLUNAS) {
         }
       }
 
-      // 8. Uso e Tipo de Lote — SEM destino ainda.
+      // 8. Uso → imovel_dados.uso (issue #38, item 1 — destravado pela #99:
+      // o destino que faltava agora existe, `PUT /imovel-dados/:tipo/:id`).
       //
-      // O catálogo (#22) não fechou, e a decisão é que esses campos vão morar no
-      // objeto Lote do Núcleo, não numa tabela do app. Gravar agora criaria uma
-      // segunda fonte da verdade para o mesmo dado. Vão para o relatório.
+      // Sempre grava quando presente, sem checar "já existia" antes — mesmo
+      // padrão do Nº Decreto (passo 5): `uso` é campo descritivo, editável a
+      // qualquer momento pela tela (não é gravação única como preço), então
+      // reimportar corrige um valor desatualizado em vez de deixá-lo parado.
+      //
+      // Tipo Lote NÃO é gravado — nunca teve destino próprio: é sempre
+      // derivado do Uso pelo app (`tipoLoteDeUso()`, `comum/catalogos.ts`).
+      // Gravá-lo seria uma segunda fonte da verdade dentro do próprio app,
+      // o problema que #19 evitou em relação ao Núcleo, um nível abaixo.
       const uso = String(row[colunas.uso] ?? '').trim();
       const tipoLote = String(row[colunas.tipo_lote] ?? '').trim();
-      if (uso || tipoLote) {
-        rel.catalogoPendente.push(`Linha ${nLinha}: uso='${uso}' tipo_lote='${tipoLote}'`);
+      if (uso) {
+        if (EXECUTAR) {
+          await req(`/imovel-dados/lote/${lote.id}`, {
+            method: 'PUT',
+            body: JSON.stringify({ uso }),
+          });
+          conta(rel.atualizados, 'uso');
+        } else {
+          conta(rel.atualizados, 'uso (simulado)');
+        }
+      } else if (tipoLote) {
+        // Tipo Lote sem Uso correspondente: não há o que derivar nem gravar.
+        // Fica pendente em vez de descartado — é dado que merece uma olhada.
+        rel.catalogoPendente.push(`Linha ${nLinha}: tipo_lote='${tipoLote}' sem uso correspondente`);
       }
 
       // 9. Transação — entidade não existe no Núcleo (#36).
@@ -517,8 +536,8 @@ function imprimirRelatorio(rel, linhas) {
     'Preço de contrato já gravado NÃO foi sobrescrito. Decida caso a caso.');
   lista('Transações pendentes', rel.transacoesPendentes,
     'A entidade Transação não existe no Núcleo (#36). Estas linhas não foram importadas.');
-  lista('Uso / Tipo de Lote pendentes', rel.catalogoPendente,
-    'O catálogo (#22) não fechou e o destino será o objeto Lote do Núcleo. Não gravado.');
+  lista('Tipo Lote sem Uso pendentes', rel.catalogoPendente,
+    'Tipo Lote não tem destino próprio — é sempre derivado do Uso. Sem Uso na linha, não há o que derivar.');
   lista('Erros', rel.erros);
 }
 

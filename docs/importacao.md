@@ -63,7 +63,8 @@ O separador agora é decidido pelo texto:
 | (ocupação morador↔lote) | `nucleo.imovel_pessoas` | `POST /lotes/:id/pessoas` |
 | Nº Decreto | `reg360.parcelamento_dados` | `parcelamento_id` |
 | Preço | `reg360.imovel_dados.preco_estatico` | **gravação única** — ver abaixo |
-| Uso, Tipo Lote | — | **não gravado**; vai para o relatório (ver abaixo) |
+| Uso | `reg360.imovel_dados.uso` | `imovel_id` (`lote.id`), via `PUT /imovel-dados/lote/:id` — ver abaixo |
+| Tipo Lote | — | **não gravado**; sempre derivado do Uso pelo app (ver abaixo) |
 | Status (Contratado / CP / Vendido) | — | **não gravado**; relatório de pendências |
 
 **O objeto é o LOTE, não a unidade.** A premissa da spec v0.9 de que todo lote gera uma unidade default nunca virou realidade: `unidades.incorporacao_id` é NOT NULL, então unidade só existe sob incorporação.
@@ -74,9 +75,15 @@ O separador agora é decidido pelo texto:
 
 O script não decide qual valor vale. Ele mostra os dois e deixa a decisão com quem sabe. Ver [precos.md](precos).
 
-## O que não é importado, e por quê
+## Uso: sempre grava, sem checar "já existia" (#38, item 1)
 
-**Uso.** O catálogo de significados fechou (#22 — `comum/catalogos.ts`), e desde as issues #19/#20/#21 o destino do dado é `imovel_dados.uso`, com rota própria (`PUT /imovel-dados/:tipo/:id`). O importador **ainda não escreve** esse campo — mapear a coluna de Uso do Planilhão e chamar a rota nova é a issue #38, item 1, que esta decisão destrava. Até lá, as linhas continuam no relatório de pendências. `tipo_lote` não tem coluna nenhuma — é sempre derivado do Uso (`tipoLoteDeUso()`), nunca gravado.
+Diferente do preço, `uso` **não é gravação única** — é campo descritivo, editável a qualquer momento pela tela (`criador`/admin). O script grava (`PUT /imovel-dados/lote/:id`) toda vez que a linha traz um valor, sem perguntar se já havia um: reimportar corrige um valor desatualizado em vez de deixá-lo parado. Mesmo padrão do Nº Decreto, que também sobrescreve sem checar.
+
+`tipo_lote` **não é gravado, nunca** — não tem coluna própria; é sempre derivado do Uso pelo app (`tipoLoteDeUso()`, `comum/catalogos.ts`). Uma linha com Tipo Lote preenchido e Uso vazio não tem o que derivar, e vira pendência (*Tipo Lote sem Uso*) em vez de ser descartada.
+
+Sobrescrever sem checar tem um custo: se alguém editar `uso` manualmente pela tela e a planilha for reimportada depois com um valor desatualizado na coluna Uso, o valor manual é perdido **silenciosamente** — sem `409`, sem entrada em divergências. Diferente do preço, `uso` não tem essa proteção.
+
+## O que não é importado, e por quê
 
 **Transação.** A entidade **existe** no Núcleo (`transacoes`, SDK 52), mas o importador ainda não a escreve — o mapeamento dos status comerciais do Planilhão para os tipos do Núcleo depende de reconciliar o catálogo (**#80**). Até lá, linhas com status comercial vão para o relatório de pendências, em vez de sumir: descartar em silêncio faria o import parecer completo e deixaria o dado comercial para trás sem ninguém saber.
 
@@ -84,7 +91,7 @@ O script não decide qual valor vale. Ele mostra os dois e deixa a decisão com 
 
 1. **Setores Habitacionais criados** no Núcleo (via `editor_nucleo`) — o app é read-only neles.
 2. **Flags de Núcleo habilitadas** em `Admin → Apps → reg360 → Núcleo`: escrever em `parcelamentos`, `matriculas`, `imoveis`, `pessoas`.
-3. **Token de API** de usuário com nível `escrita`+ no reg360 e os roles `criador` e `editor_regularizacao` — o primeiro grava preço, o segundo grava o decreto.
+3. **Token de API** de usuário com nível `escrita`+ no reg360 e os roles `criador` e `editor_regularizacao` — o primeiro grava preço e uso, o segundo grava o decreto.
 4. Planilhão exportado para **CSV UTF-8**.
 
 ## Procedimento
@@ -114,7 +121,7 @@ Import que só diz "ok" esconde o que não entrou. O relatório sai por categori
 - **Criados** / **Atualizados** / **Ignorados (já existiam)** — por tipo de entidade
 - **Divergências de preço** — preço de contrato já gravado, não sobrescrito
 - **Transações pendentes** — linhas com status comercial
-- **Uso pendente** — o destino (`imovel_dados.uso`) já existe (#19/#20/#21); o importador escrever nele é a #38, item 1
+- **Tipo Lote sem Uso pendentes** — Tipo Lote preenchido sem Uso correspondente; não há o que derivar
 - **Erros** — por linha, com o número da linha do CSV
 
 Código de saída: `0` limpo, `2` com erros de linha, `3` interrompido (filtro ignorado — ver armadilha 1).
