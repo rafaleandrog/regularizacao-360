@@ -1,14 +1,11 @@
 import { Router } from 'express';
 import { proximaPagina } from '../comum/paginacao.js';
 import { upsertPorChave } from './upsert.js';
-import { semCamposProtegidos } from '../comum/quitacao.js';
+import { semCamposProtegidos, apenasEditaveisImovel } from '../comum/quitacao.js';
 
 /**
  * Rotas de `imovel_dados` — dados que a UP mantém por imóvel e que não existem
  * no Núcleo.
- *
- * Este arquivo entrega só os PREÇOS. `uso` e `tipo_lote` entram quando o
- * catálogo da issue #22 estiver fechado; `quitado` na #35.
  *
  * O **preço estático** tem regra própria e é por isso que ele não divide rota
  * com o resto: ele é o registro de um contrato firmado — enquanto a integração
@@ -198,6 +195,40 @@ rotasImovelDados.put('/imovel-dados/:tipo/:id/preco-manual', async (req, res) =>
     res.json(salvo);
   } catch (err: any) {
     erro(res, 422, 'REG360_SALVAR_FALHOU', err?.message || 'Falha ao salvar preço manual');
+  }
+});
+
+/**
+ * PUT /api/reg360/imovel-dados/:tipo/:id — dados descritivos: `uso` e
+ * `observacao` (issue #20).
+ *
+ * `tipo_lote` não é aceito aqui, de propósito: é sempre derivado do Uso
+ * (`tipoLoteDeUso()`, em `comum/catalogos.ts`), nunca gravado — gravar os dois
+ * seria uma segunda fonte da verdade dentro do próprio app.
+ *
+ * As duas guardas, na ordem certa: `apenasEditaveisImovel` filtra o corpo para
+ * só os campos que esta rota entende (o que sobra fora é ignorado, não é
+ * ataque); `semCamposProtegidos` roda ANTES sobre o corpo bruto, porque ela
+ * precisa ver `preco_estatico`/`quitado` para recusar — depois do pick da
+ * allowlist eles já teriam sumido, e a recusa explícita (400) viraria descarte
+ * silencioso, que é exatamente o que a #20 pede para não acontecer.
+ */
+rotasImovelDados.put('/imovel-dados/:tipo/:id', async (req, res) => {
+  try {
+    if (!podeCriar(req)) {
+      return erro(res, 403, 'SEM_PERMISSAO', 'Apenas criadores podem editar os dados do imóvel');
+    }
+    const alvo = lerAlvo(req);
+    if ('erro' in alvo) return erro(res, 400, 'REG360_PARAMS_INVALIDOS', alvo.erro);
+
+    const protegido = semCamposProtegidos(req.body || {});
+    if ('erro' in protegido) return erro(res, 400, 'REG360_CAMPO_PROTEGIDO', protegido.erro);
+
+    const campos = apenasEditaveisImovel(req.body);
+    const salvo = await salvar(req, alvo.imovelId, alvo.imovelTipo, campos);
+    res.json(salvo);
+  } catch (err: any) {
+    erro(res, 422, 'REG360_SALVAR_FALHOU', err?.message || 'Falha ao salvar dados do imóvel');
   }
 });
 

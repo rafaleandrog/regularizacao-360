@@ -76,7 +76,7 @@ O script não decide qual valor vale. Ele mostra os dois e deixa a decisão com 
 
 ## O que não é importado, e por quê
 
-**Uso e Tipo de Lote.** O catálogo de significados fechou (#22 — `comum/catalogos.ts`), mas o destino do dado continua sendo o objeto **Lote do Núcleo**, não uma tabela do app — e o payload do Lote ainda não traz `uso` nem `tipo_lote` (SDK 52). Gravá-los agora criaria uma segunda fonte da verdade para o mesmo dado. As linhas vão para o relatório até o campo chegar no Núcleo.
+**Uso.** O catálogo de significados fechou (#22 — `comum/catalogos.ts`), e desde as issues #19/#20/#21 o destino do dado é `imovel_dados.uso`, com rota própria (`PUT /imovel-dados/:tipo/:id`). O importador **ainda não escreve** esse campo — mapear a coluna de Uso do Planilhão e chamar a rota nova é a issue #38, item 1, que esta decisão destrava. Até lá, as linhas continuam no relatório de pendências. `tipo_lote` não tem coluna nenhuma — é sempre derivado do Uso (`tipoLoteDeUso()`), nunca gravado.
 
 **Transação.** A entidade **existe** no Núcleo (`transacoes`, SDK 52), mas o importador ainda não a escreve — o mapeamento dos status comerciais do Planilhão para os tipos do Núcleo depende de reconciliar o catálogo (**#80**). Até lá, linhas com status comercial vão para o relatório de pendências, em vez de sumir: descartar em silêncio faria o import parecer completo e deixaria o dado comercial para trás sem ninguém saber.
 
@@ -114,7 +114,7 @@ Import que só diz "ok" esconde o que não entrou. O relatório sai por categori
 - **Criados** / **Atualizados** / **Ignorados (já existiam)** — por tipo de entidade
 - **Divergências de preço** — preço de contrato já gravado, não sobrescrito
 - **Transações pendentes** — linhas com status comercial
-- **Uso / Tipo de Lote pendentes** — aguardando o campo chegar no Lote do Núcleo (o catálogo de significados já fechou, #22)
+- **Uso pendente** — o destino (`imovel_dados.uso`) já existe (#19/#20/#21); o importador escrever nele é a #38, item 1
 - **Erros** — por linha, com o número da linha do CSV
 
 Código de saída: `0` limpo, `2` com erros de linha, `3` interrompido (filtro ignorado — ver armadilha 1).

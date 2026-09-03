@@ -209,6 +209,10 @@
         },
         "observacao": {
           "tipo": "texto_longo"
+        },
+        "uso": {
+          "tipo": "texto",
+          "limite": 20
         }
       },
       "unicos": [["imovel_id", "imovel_tipo"]],

@@ -66,6 +66,15 @@ import {
   type TipoAcao,
   type PapelPessoa,
 } from '../comum/acoes.js';
+import {
+  rotuloDeUso,
+  descricaoDeUso,
+  corDeUso,
+  familiaDoUso,
+  tipoLoteDeUso,
+  sugestoesDeUso,
+  usosSemFamilia,
+} from '../comum/catalogos.js';
 
 // urbi-shell-page não está no barrel de primitivos — os demais urbi-* são
 // registrados globalmente pelo shell (ui/src/primitivos.ts).
@@ -362,6 +371,17 @@ export class AppReg360 extends LitElement {
   @state() private soIncompletos = false;
   /** Filtro de quitação na tabela de lotes: o índice `(imovel_tipo, quitado)` existe para isto. */
   @state() private filtroQuitacao: 'todos' | 'quitados' | 'nao_quitados' = 'todos';
+  /**
+   * Filtros de Uso e Tipo de Lote na tabela de lotes do Parcelamento (#21).
+   * `'todos'` é o valor de "sem filtro" — os demais são o `valor` cru de
+   * `comum/catalogos.ts` (Uso) ou `'Residencial'`/`'Comercial'` (Tipo, que é
+   * sempre derivado do Uso, nunca um campo próprio).
+   *
+   * Filtro no CLIENTE, sobre o conjunto já carregado — `uso` é dado do app
+   * (`imovel_dados`, via `precosPorImovel`), o Núcleo não filtra lote por ele.
+   */
+  @state() private filtroUso = 'todos';
+  @state() private filtroTipoLote = 'todos';
   @state() private contatosPorPessoa = new Map<number, { telefones: any[]; emails: any[] }>();
   /**
    * Imóveis por pessoa. Só existe para o parcelamento que o usuário escolheu
@@ -1665,6 +1685,18 @@ export class AppReg360 extends LitElement {
     }
   }
 
+  /** `uso` cru de um lote, lido de `precosPorImovel` — `null` sem registro. */
+  private _usoDoLote(l: any): string | null {
+    const d = this.precosPorImovel.get(chaveImovel(l?.id, 'lote'));
+    return d?.uso ?? null;
+  }
+
+  /** Usos dos lotes DESTE parcelamento sem família de piso conhecida. */
+  private get _usosSemFamiliaDoParcelamento(): string[] {
+    if (!this.basesDoVgvCarregadas) return [];
+    return usosSemFamilia(this.lotes.map((l) => this._usoDoLote(l)));
+  }
+
   /** Lotes visíveis na página atual, já filtrados. */
   private get _lotesFiltrados(): any[] {
     const porQuitacao = (lista: any[]) => {
@@ -1684,7 +1716,17 @@ export class AppReg360 extends LitElement {
         return Boolean(d?.quitado) === querQuitado;
       });
     };
-    return porQuitacao(this._lotesPorBusca);
+    // Mesma base e mesma guarda de "ainda não carregou" da quitação — Uso e
+    // Tipo de Lote vêm do mesmo `imovel_dados` que o VGV já carrega.
+    const porUso = (lista: any[]) => {
+      if (this.filtroUso === 'todos' || !this.basesDoVgvCarregadas) return lista;
+      return lista.filter((l) => this._usoDoLote(l) === this.filtroUso);
+    };
+    const porTipoLote = (lista: any[]) => {
+      if (this.filtroTipoLote === 'todos' || !this.basesDoVgvCarregadas) return lista;
+      return lista.filter((l) => tipoLoteDeUso(this._usoDoLote(l)) === this.filtroTipoLote);
+    };
+    return porTipoLote(porUso(porQuitacao(this._lotesPorBusca)));
   }
 
   private get _lotesPorBusca(): any[] {
@@ -2598,12 +2640,33 @@ export class AppReg360 extends LitElement {
             void this._carregarPessoasDaPagina();
           }}
         ></urbi-chips-atalho>
+        <urbi-select label="Tipo"
+          .opcoes=${[
+            { valor: 'todos', rotulo: 'Todos' },
+            { valor: 'Residencial', rotulo: 'Residencial' },
+            { valor: 'Comercial', rotulo: 'Comercial' },
+          ]}
+          .valor=${this.filtroTipoLote}
+          @urbi:select-change=${(e: CustomEvent) => {
+            this.filtroTipoLote = String(e.detail.valor ?? 'todos');
+            this.paginaLotes = 1;
+          }}></urbi-select>
+        <urbi-select label="Uso"
+          .opcoes=${[
+            { valor: 'todos', rotulo: 'Todos' },
+            ...sugestoesDeUso().map((v) => ({ valor: v, rotulo: rotuloDeUso(v) ?? v })),
+          ]}
+          .valor=${this.filtroUso}
+          @urbi:select-change=${(e: CustomEvent) => {
+            this.filtroUso = String(e.detail.valor ?? 'todos');
+            this.paginaLotes = 1;
+          }}></urbi-select>
       </urbi-wrap>
-      ${this.filtroQuitacao !== 'todos' && !this.basesDoVgvCarregadas
+      ${(this.filtroQuitacao !== 'todos' || this.filtroUso !== 'todos' || this.filtroTipoLote !== 'todos') && !this.basesDoVgvCarregadas
         ? html`<p class="prop-meta">
             ${this.carregandoVgv
-              ? 'Carregando os dados de quitação — o filtro ainda não está valendo.'
-              : 'Os dados de quitação não carregaram, então este filtro está sem efeito: a lista abaixo é a completa.'}
+              ? 'Carregando os dados de quitação, uso e tipo de lote — os filtros ainda não estão valendo.'
+              : 'Os dados de quitação, uso e tipo de lote não carregaram, então estes filtros estão sem efeito: a lista abaixo é a completa.'}
           </p>`
         : nothing}
       <urbi-input
@@ -2651,6 +2714,16 @@ export class AppReg360 extends LitElement {
               return rotuloReferencia(m ? nomeDe(m) : null, l.matricula_id);
             } },
           { id: 'area', label: 'Área (m²)', alinhamento: 'direita', valor: (l: any) => fmtArea(l.area_efetiva ?? l.area) },
+          { id: 'uso', label: 'Uso', render: (l: any) => {
+              // Base ainda em voo — mesmo `…` da coluna Pessoas: "não sei
+              // ainda" não pode aparecer com a cara de "—" (sem uso).
+              if (!this.basesDoVgvCarregadas) return html`<span class="prop-meta">…</span>`;
+              const uso = this._usoDoLote(l);
+              if (!uso) return html`<span class="prop-meta">—</span>`;
+              const rotulo = rotuloDeUso(uso) ?? uso;
+              const descricao = descricaoDeUso(uso);
+              return html`<urbi-badge cor=${corDeUso(uso)} title=${descricao ?? rotulo}>${rotulo}</urbi-badge>`;
+            } },
           { id: 'pessoas', label: 'Pessoas', render: (l: any) => {
               const vinculos = this.pessoasPorLote.get(Number(l.id));
               if (this.lotesComFalhaDePessoas.has(Number(l.id))) {
@@ -2684,6 +2757,16 @@ export class AppReg360 extends LitElement {
             os ocupantes carregados — a coluna Pessoas deles está marcada, não vazia.
             <urbi-botao variante="fantasma" pequeno @click=${() => void this._recarregarPessoasQueFalharam()}>Tentar de novo</urbi-botao>
           </p>`
+        : nothing}
+      ${this._usosSemFamiliaDoParcelamento.length > 0
+        // A checagem de piso ainda não está ligada na tela (docs/precos.md),
+        // mas o catálogo já é a fonte de família — e um Uso fora dele deixaria
+        // `respeitaPiso` desligado em silêncio quando essa checagem entrar.
+        // O aviso é o que a #21 pede em vez disso: visível agora, não calado.
+        ? html`<urbi-banner variante="aviso">
+            Uso sem família de piso conhecida: <strong>${this._usosSemFamiliaDoParcelamento.join(', ')}</strong>.
+            A checagem de piso não vale para esses lotes até o catálogo em <code>comum/catalogos.ts</code> aprender o valor.
+          </urbi-banner>`
         : nothing}
 
       ${paginas > 1
@@ -2762,7 +2845,55 @@ export class AppReg360 extends LitElement {
           // para preservar.
           return texto ? html`<urbi-badge cor=${eq === 'falhou' ? 'erro' : 'padrao'}>${texto}</urbi-badge>` : nothing;
         })()}
+        ${(() => {
+          // Uso e Tipo de Lote (#21) — Tipo nunca vem do dado bruto, é sempre
+          // derivado do Uso (`tipoLoteDeUso`). Os dois só afirmam algo depois
+          // que a leitura de `dadosDoImovel` concluiu — `{}` em voo e `{}` por
+          // falha são o mesmo objeto, e um badge aqui não pode confundir
+          // "ainda não sei" com "não tem uso".
+          if (this.leituraDadosDoImovel !== 'concluida') return nothing;
+          const uso = this.dadosDoImovel?.uso ?? null;
+          if (!uso) return nothing;
+          const rotulo = rotuloDeUso(uso) ?? uso;
+          const tipo = tipoLoteDeUso(uso);
+          return html`
+            <urbi-badge cor=${corDeUso(uso)} title=${descricaoDeUso(uso) ?? rotulo}>${rotulo}</urbi-badge>
+            ${tipo ? html`<urbi-badge cor="padrao">${tipo}</urbi-badge>` : nothing}
+          `;
+        })()}
       </urbi-wrap>
+      ${this.podeCriar && this.leituraDadosDoImovel === 'concluida'
+        ? html`<urbi-select label="Uso"
+            .opcoes=${[
+              { valor: '', rotulo: '— sem uso —' },
+              ...sugestoesDeUso().map((v) => ({ valor: v, rotulo: rotuloDeUso(v) ?? v })),
+            ]}
+            .valor=${this.dadosDoImovel?.uso ?? ''}
+            @urbi:select-change=${(e: CustomEvent) => {
+              if (!this.rota.id) return;
+              const uso = String(e.detail.valor ?? '');
+              // '' vira null explícito, não `undefined`: `undefined` some do
+              // JSON e a allowlist do backend (`apenasEditaveisImovel`) o lê
+              // como "campo não mandado" — o uso atual ficaria intocado em vez
+              // de limpo. `null` é a intenção "— sem uso —" de verdade.
+              void this._acaoPreco(
+                () => reg360Api.salvarDadosImovel(this.rota.view as string, this.rota.id!, { uso: uso || null }),
+                'Uso atualizado',
+              );
+            }}
+          ></urbi-select>
+          <urbi-input label="Observação"
+            .valor=${this.dadosDoImovel?.observacao ?? ''}
+            @urbi:input-change=${(e: CustomEvent) => {
+              if (!this.rota.id) return;
+              const observacao = String(e.detail.valor ?? '');
+              void this._acaoPreco(
+                () => reg360Api.salvarDadosImovel(this.rota.view as string, this.rota.id!, { observacao: observacao || null }),
+                'Observação atualizada',
+              );
+            }}
+          ></urbi-input>`
+        : nothing}
       ${this.avisoHerancaUnidade
         // Aviso explicativo (a herança pulou um nível), não uma falha —
         // `alerta` é a variante correta; `aviso` não existe no contrato.

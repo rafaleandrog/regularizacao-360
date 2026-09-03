@@ -81,7 +81,7 @@ Boa parte do desenho atual existe para driblar limitações do Núcleo que valia
 
 | O que conferir | Se mudou, revisita |
 |---|---|
-| `uso` e `tipo_lote` chegaram no payload do **Lote**? | #22 destrava, e **#19, #20 e #21 precisam ser reescritas**: hoje elas mandam criar coluna em `imovel_dados`, o que passaria a ser segunda fonte da verdade. O app deve **ler do lote** |
+| ~~`uso` e `tipo_lote` chegaram no payload do **Lote**?~~ **Decisão reaberta, não mais em espera** (2026-09-03) | O Ricardo decidiu não esperar: `imovel_dados.uso` foi criado (#19/#20/#21), aceitando conscientemente uma segunda fonte da verdade até o Núcleo entregar o campo. Se um dia `uso` chegar no payload do Lote, **isto vira migração de dado** (backfill de `imovel_dados.uso` a partir do Lote, e a app passa a ler de lá) — não é mais "implementar do zero". `tipo_lote` continua sem coluna: é sempre derivado do Uso (`tipoLoteDeUso()`) |
 | ~~Existe rota de **pessoa → imóveis**?~~ **Não existe** (SDK 52) | Conferido em 2026-09-02. `imovel_pessoas` só é alcançável por `GET /{lote\|gleba\|unidade}/:id/pessoas` — imóvel → pessoas, nunca o inverso. A tela de Moradores continua justificada como está: recorte escolhido pelo usuário, e três estados de situação em vez de dois. Ver `docs/moradores.md` |
 | ~~`GET /pessoas` expande **contatos** na listagem?~~ **Não expande** (SDK 52) | Conferido em 2026-09-02. Contato é sub-recurso (`/pessoas/fisicas/:id/{emails,telefones}`); a listagem unificada não o traz. A requisição por linha para telefone e email continua necessária |
 | `parcelamentos.setor_habitacional_id` e `lotes.parcelamento_id` estão **preenchidos**? | É a #13. Se estiverem nulos, a navegação não anda e a Onda 1 vira importação antes de tela |
@@ -92,7 +92,7 @@ Boa parte do desenho atual existe para driblar limitações do Núcleo que valia
 1. **A referência continua sendo o SDK publicado**, não o `main` do monorepo nem o que a Pinguim roda. Instância atualizada não significa SDK cunhado — e usar verbo que só existe no `main` já derrubou o CI aqui (o `varrerTudo` do PR #48).
 2. **Filtro fora da allowlist continua sendo ignorado em silêncio** até prova em contrário. O importador só é seguro porque confere o que voltou (`casaComChave`); não tire essa guarda porque "agora o Núcleo é novo".
 
-**Três das cinco já estão conferidas** (Transação, pessoa → imóveis, contatos na listagem) e uma foi respondida pelo schema (`uso`/`tipo_lote` **não** chegaram ao Lote — por isso #19, #20 e #21 estão paradas em vez de implementadas). **Sobra uma, e ela não é de contrato: é de dado** — se `parcelamentos.setor_habitacional_id` está preenchido. Só a instância responde, e é a #13.
+**Quatro das cinco já estão resolvidas** (Transação, pessoa → imóveis, contatos na listagem, e Uso/Tipo de Lote — reaberta e decidida, não mais em espera do Núcleo). **Sobra uma, e ela não é de contrato: é de dado** — se `parcelamentos.setor_habitacional_id` está preenchido. Só a instância responde, e é a #13.
 
 O que fica esperando essa atualização: **#40** (release, instalação e QA — a skill `qa` precisa das variáveis `URBIVERSO_QA_*` no ambiente da sessão) e as issues da tabela acima.
 
