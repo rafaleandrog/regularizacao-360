@@ -61,8 +61,9 @@ export function estadoDaLista(estado: EstadoContagem, frases: FrasesDaLista): Es
  *
  * Devolve `null` quando a leitura não concluiu — e `null` é de propósito, não
  * `0`: quem chama tem de escolher uma frase, e não pode cair num número por
- * distração. É o mesmo motivo pelo qual `valorDoImovel` devolve `null` em vez
- * de zero.
+ * distração. O motivo é o mesmo que em `valorDoImovel`: ambos usam `null` para
+ * forçar quem chama a distinguir, mas as causas diferem — ali dado ausente, aqui
+ * leitura não concluída.
  */
 export function numeroLido(estado: EstadoContagem, quantidade: number): number | null {
   return estado === 'concluida' ? quantidade : null;
